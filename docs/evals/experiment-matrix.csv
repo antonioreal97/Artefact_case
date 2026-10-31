@@ -1,0 +1,11 @@
+variant_id,profile,route_policy,model_role,provider,model_id,repetitions,purpose
+paid_strong_openai,paid_baseline,all_generative_paid,strong,openai,SET_AT_RUN_TIME,3,quality baseline
+paid_economy_openai,paid_optimized,risk_routed,economy,openai,SET_AT_RUN_TIME,3,paid cost optimization
+paid_strong_anthropic,paid_baseline,all_generative_paid,strong,anthropic,SET_AT_RUN_TIME,3,cross-provider quality
+paid_economy_anthropic,paid_optimized,risk_routed,economy,anthropic,SET_AT_RUN_TIME,3,cross-provider economy
+paid_strong_google,paid_baseline,all_generative_paid,strong,google,SET_AT_RUN_TIME,3,cross-provider quality
+paid_economy_google,paid_optimized,risk_routed,economy,google,SET_AT_RUN_TIME,3,cross-provider economy
+local_only,local_dev,all_generative_local,local,local,SET_AT_RUN_TIME,3,diagnostic lower bound
+hybrid_routed,hybrid,qualified_slices_local,local_plus_paid,mixed,SET_AT_RUN_TIME,3,proposed production route
+hybrid_local_first,hybrid,eligible_local_then_paid_on_failure,local_plus_paid,mixed,SET_AT_RUN_TIME,3,measure fallback penalty on public/internal traffic only
+

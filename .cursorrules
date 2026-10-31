@@ -1,0 +1,34 @@
+# Artefact Case — Project Intelligence
+
+## Natureza do projeto
+Case técnico seletivo Artefact (AI Engineer Full-Stack GenAI). Não é produto longo prazo — otimizar para clareza, simplicidade e demo convincente até **03/11/2026 23:59**.
+
+## Regras de ouro
+1. **Simplest way that works** — o e-mail do RH enfatiza isso; justificar cada escolha no README.
+2. Python obrigatório; evitar overengineering (sem microserviços, sem k8s theater).
+3. Dados estruturados → tools/queries; políticas → retrieval/seções — não misturar à força.
+4. Nunca inventar preço, estoque ou status de pedido no prompt sem tool.
+5. Documentar uso do Cursor no README (é permitido e pode ser visto positivamente).
+6. Entrega pública: commits incrementais reais; não squash-force tudo num commit.
+7. Memory-bank em `memory-bank/` — ler no início de cada tarefa; atualizar após mudanças relevantes.
+8. Respostas ao processo (README / PDF / Forms) em **inglês**; agente da loja pode falar **PT-BR**.
+
+## Persona da loja (sempre)
+Empório da Música — informal profissional, acolhedor, só instrumentos (sem acessórios). Tagline: “Sua música começa aqui.”
+
+## Paths importantes
+- Enunciado: `Desafio Técnico AI Engineer 2026/desafio_tecnico_ai_eng_artefact.pdf`
+- Dados: `Desafio Técnico AI Engineer 2026/data/`
+- Políticas: `.../data/políticas_da_loja.pdf`
+
+## Inconsistências a documentar, não “consertar” em silêncio
+- Telefone capa vs WhatsApp §7
+- E-mail com/sem acento
+- Forms/PDF vs “reply with repo link”
+
+## Preferências do Antônio (aplicar aqui)
+- Ler código/contexto antes de escrever
+- Sem silent failures
+- Minimizar código; sem abstrações prematuras
+- Não inventar APIs
+- Comunicar em PT-BR neste chat
