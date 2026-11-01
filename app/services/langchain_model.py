@@ -28,6 +28,9 @@ from langchain_core.messages import (
     ToolCall,
     ToolMessage,
 )
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+from openai import DefaultAsyncHttpxClient, DefaultHttpxClient
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputMessage,
@@ -49,16 +52,26 @@ def split_model(model: str | None, *, embeddings: bool = False) -> tuple[str, st
     return provider, name
 
 
+class _OwnedChatOpenAI(ChatOpenAI):
+    """Factory marker: both HTTP clients were created here, never borrowed or cached."""
+
+
+class _OwnedChatOllama(ChatOllama):
+    """Factory marker: Ollama constructs fresh sync/async clients for each instance."""
+
+
 def create_chat_model(settings: Settings) -> BaseChatModel:
     provider, name = split_model(settings.langchain_chat_model)
     if provider == "openai":
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
+        return _OwnedChatOpenAI(
             model=name,
             api_key=settings.openai_api_key,
             timeout=settings.model_timeout_seconds,
             max_retries=0,
+            # SDK defaults select the matching HTTP library (httpx/httpx2 by SDK version).
+            # Explicit clients bypass langchain-openai's process-wide cached clients.
+            http_client=DefaultHttpxClient(timeout=settings.model_timeout_seconds),
+            http_async_client=DefaultAsyncHttpxClient(timeout=settings.model_timeout_seconds),
             use_responses_api=False,
             store=False,
             callbacks=[],
@@ -75,9 +88,7 @@ def create_chat_model(settings: Settings) -> BaseChatModel:
             callbacks=[],
             verbose=False,
         )
-    from langchain_ollama import ChatOllama
-
-    return ChatOllama(
+    return _OwnedChatOllama(
         model=name,
         base_url=settings.ollama_base_url,
         client_kwargs={"timeout": settings.model_timeout_seconds},
@@ -287,13 +298,18 @@ class LangChainModel(Model):
         raise NotImplementedError("LangChain streaming is unsupported; ChatService uses Runner.run")
 
     async def close(self) -> None:
-        # Provider integrations expose different owners for their HTTP connection pools.
-        if self.provider == "openai":
-            await self.model.root_async_client.close()  # type: ignore[attr-defined]
-            self.model.root_client.close()  # type: ignore[attr-defined]
-        elif self.provider == "anthropic":
-            await self.model._async_client.close()  # type: ignore[attr-defined]
-            self.model._client.close()  # type: ignore[attr-defined]
-        elif self.provider == "ollama":
-            await self.model._async_client._client.aclose()  # type: ignore[attr-defined]
-            self.model._client._client.close()  # type: ignore[attr-defined]
+        # Never infer ownership from provider name or close borrowed SDK roots.
+        # Anthropic caches HTTP clients and offers no public injection fields; leave
+        # those process-owned clients alone. Externally supplied models are borrowed too.
+        if isinstance(self.model, _OwnedChatOpenAI):
+            try:
+                if self.model.http_async_client is not None:
+                    await self.model.http_async_client.aclose()
+            finally:
+                if self.model.http_client is not None:
+                    self.model.http_client.close()
+        elif isinstance(self.model, _OwnedChatOllama):
+            try:
+                await self.model._async_client._client.aclose()
+            finally:
+                self.model._client._client.close()

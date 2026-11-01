@@ -140,6 +140,12 @@ async def create_tenant(
                 extra={"tagline": "Sua música começa aqui."},
             )
         )
+    else:
+        # Existing seed tenants need newly documented public contacts too. Preserve
+        # operator-added values and persona/model settings; never touch other tenants.
+        config.public_contact_values = list(
+            dict.fromkeys([*(config.public_contact_values or []), *PUBLIC_CONTACT_VALUES])
+        )
     plaintext = await _ensure_key(
         session, tenant.id, name="seed", scopes=SCOPES, api_key=api_key, generate=True
     )

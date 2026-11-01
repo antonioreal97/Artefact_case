@@ -74,8 +74,10 @@ async def test_embedding_failure_is_safe(client, world: World, monkeypatch, logs
         raise RuntimeError(LEAKY)
 
     monkeypatch.setattr(HashEmbeddingProvider, "embed_query", broken)
-    # Unique wording so the shared query-embedding cache cannot serve a cached vector.
-    reply = await chat(client, world.a, f"Política de trocas {uuid.uuid4().hex}?")
+    # Unique alphabetic wording bypasses the embedding cache without accidentally
+    # generating phone/CEP digits in customer free text (the O-8 fixture flake).
+    nonce = uuid.uuid4().hex.translate(str.maketrans("0123456789", "ghijklmnop"))
+    reply = await chat(client, world.a, f"Política de trocas {nonce}?")
     await _assert_handoff(client, world.a, reply, {"tool_failure", "no_information"})
     _assert_clean(reply, logs.text())
 

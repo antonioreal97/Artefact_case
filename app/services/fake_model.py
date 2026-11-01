@@ -41,6 +41,11 @@ _GREETING = re.compile(
     r"(?:tudo bem\??)?[\s!.]*"
 )
 _COMMERCE = re.compile(r"(?i)pre[cç]o|valor|custa|estoque|dispon[ií]ve(?:l|is)")
+# Service inquiries concern store policy, even when they name an instrument or price.
+_SERVICE = re.compile(
+    r"(?i)\b(?:servi[cç]os?|manuten[cç][aã]o|consertos?|reparos?|"
+    r"regulage(?:m|ns)|luthier(?:ia)?)\b"
+)
 _PRODUCT = re.compile(r"(?i)produto|viol(?:[aã]o|[oõ]es)|guitarra|piano|teclado")
 _IN_STOCK = re.compile(r"(?i)\bdispon[ií]ve(?:l|is)\b|\bem estoque\b")
 _MAX_PRICE = re.compile(
@@ -133,7 +138,9 @@ class FakeCommerceModel(ScriptedModel):
                 )
             if _GREETING.fullmatch(text.strip()):
                 return [assistant_message("Olá! Como posso ajudar?")]
-            if _COMMERCE.search(text) or (_PRODUCT.search(text) and not _POLICY.search(text)):
+            if not _SERVICE.search(text) and (
+                _COMMERCE.search(text) or (_PRODUCT.search(text) and not _POLICY.search(text))
+            ):
                 return self._call("search_products", _catalog_arguments(text))
             # Hash retrieval needs shared lexemes; normalize common return paraphrases.
             query = re.sub(r"(?i)\barrependi\b", "arrependimento", text)

@@ -6,6 +6,7 @@ small, so text search runs in Python over a tenant-filtered fetch (case/accent-i
 
 from __future__ import annotations
 
+import re
 import unicodedata
 import uuid
 from collections.abc import Sequence
@@ -38,6 +39,33 @@ _CENT = Decimal("0.01")
 _STOPWORDS = frozenset(
     {"a", "as", "o", "os", "e", "de", "da", "do", "das", "dos", "um", "uma", "para", "com"}
 )
+# Portuguese shopping intent is not a catalog attribute. Keep this bounded and
+# accent-folded; stock/price constraints still come from the typed query filters.
+_COMMERCE_INTENT = frozenset(
+    {
+        "estoque",
+        "disponivel",
+        "disponiveis",
+        "preco",
+        "precos",
+        "valor",
+        "quanto",
+        "custa",
+        "custam",
+        "promocao",
+        "promocoes",
+        "oferta",
+        "ofertas",
+        "desconto",
+        "barato",
+        "tem",
+        "voces",
+        "quero",
+        "comprar",
+        "modelo",
+        "instrumento",
+    }
+)
 _DB_ERRORS = (SQLAlchemyError, OSError)
 _UNAVAILABLE = "commerce backend unavailable"
 
@@ -46,6 +74,31 @@ def normalize_text(value: str) -> str:
     """Casefold and strip accents (``"Violão"`` -> ``"violao"``)."""
     decomposed = unicodedata.normalize("NFKD", value.casefold())
     return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def _word_stems(word: str) -> set[str]:
+    """Bounded pt-BR inflections; retain originals for ambiguous suffixes."""
+    stems = {word}
+    for plural, singular in (
+        ("oes", "ao"),
+        ("aes", "ao"),
+        ("ais", "al"),
+        ("eis", "el"),
+        ("ns", "m"),
+        ("s", ""),
+    ):
+        if word.endswith(plural) and len(word) > len(plural) and len(word) > 3:
+            stems.add(word[: -len(plural)] + singular)
+    return stems
+
+
+def _search_stems(text: str) -> set[str]:
+    return {stem for word in re.findall(r"\w+", text) for stem in _word_stems(word)}
+
+
+def _term_matches(term: str, text: str, stems: set[str]) -> bool:
+    # Preserve substring searches (brands/model fragments), adding inflections.
+    return term in text or bool(_word_stems(term) & stems)
 
 
 def promotional_price(price: Decimal, discount_percent: Decimal) -> Decimal:
@@ -148,18 +201,28 @@ class LocalCommerceBackend:
         except _DB_ERRORS:
             raise BackendUnavailableError(_UNAVAILABLE) from None
 
-        terms = [t for t in normalize_text(query.text or "").split() if t not in _STOPWORDS]
+        terms = set(re.findall(r"\w+", normalize_text(query.text or ""))) - (
+            _STOPWORDS | _COMMERCE_INTENT
+        )
         category_filter = normalize_text(query.category).strip() if query.category else ""
 
-        scored: list[tuple[int, ProductSummary]] = []
+        scored: list[tuple[int, int, ProductSummary]] = []
         for product in products:
             category = categories.get(product.category_external_id, "")
             norm_category = normalize_text(category)
-            if category_filter and category_filter not in norm_category:
+            if category_filter and not (
+                category_filter in norm_category
+                or all(
+                    _term_matches(term, norm_category, _search_stems(norm_category))
+                    for term in category_filter.split()
+                )
+            ):
                 continue
             norm_name = normalize_text(product.name)
             haystack = f"{norm_name} {normalize_text(product.description)} {norm_category}"
-            if not all(term in haystack for term in terms):
+            haystack_stems = _search_stems(haystack)
+            matched = sum(_term_matches(term, haystack, haystack_stems) for term in terms)
+            if terms and not matched:
                 continue
             summary = self._summary(product, category, promos.get(product.external_id, []))
             if query.in_stock_only and not summary.available:
@@ -174,11 +237,18 @@ class LocalCommerceBackend:
                 continue
             if query.max_price is not None and effective > query.max_price:
                 continue
-            name_hits = sum(1 for term in terms if term in norm_name)
-            scored.append((name_hits, summary))
+            name_stems = _search_stems(norm_name)
+            name_hits = sum(_term_matches(term, norm_name, name_stems) for term in terms)
+            scored.append((matched, name_hits, summary))
 
-        scored.sort(key=lambda item: (-item[0], not item[1].available, item[1].product_id))
-        return [summary for _, summary in scored[:limit]]
+        # Prefer all meaningful terms. Only when no filtered product matches them all,
+        # rank partial matches by coverage, then name hits; zero matches never qualify.
+        exact = [item for item in scored if item[0] == len(terms)]
+        scored = exact or scored
+        scored.sort(
+            key=lambda item: (-item[0], -item[1], not item[2].available, item[2].product_id)
+        )
+        return [summary for _, _, summary in scored[:limit]]
 
     async def get_product(self, product_id: int) -> ProductDetails | None:
         try:

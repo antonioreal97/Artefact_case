@@ -100,13 +100,45 @@ _CLAIM_WORDS = re.compile(
 )
 _REQUEST = re.compile(
     r"\b(?:preciso d[oa]s?|pode(?:ria)? (?:me )?(?:informar|enviar|confirmar|passar|dizer)|"
-    r"informe|gostaria de saber)\b"
+    r"preciso confirmar|(?:nao )?envie|informe|me passe|gostaria de saber)\b"
 )
+# Offers describe a possible lookup, not its result. Do not exempt a neighboring
+# assertion or a numeric value just because the sentence starts with an offer.
+_LOOKUP_ACTION = (
+    r"(?:buscar|ver|checar|consultar|filtrar|pesquisar|verificar|procurar|"
+    r"explicar|ajudar|localizar|comparar)"
+)
+_OFFER_OR_SCOPE = re.compile(
+    rf"^\s*(?:[-*•]\s*)?(?:(?:(?:eu )?(?:posso|podemos|vou|vamos)\s+)?"
+    rf"{_LOOKUP_ACTION}\b|(?:quer|deseja) (?:que eu |que a gente )?"
+    r"(?:busc|vej|chec|consult|filtr|pesquis|verifi|procur)\w*\b)|"
+    r"\b(?:atuo|ajudo) (?:so |somente |apenas )?(?:sobre|com)\b|"
+    rf"\b(?:posso|podemos|vou|vamos)\s+{_LOOKUP_ACTION}\b|"
+    r"^assim que voce (?:passar|enviar|informar)\b"
+)
+_ASSERTED_RESULT = re.compile(
+    r"\b(?:temos|ha|tem|existe[m]?|esta|estao|esgotou|encontrei|encontramos|custa\w*|"
+    r"oferecemos|vendemos|aceitamos|garantimos|enviado|entregue|aprovado|cancelado)\b|"
+    r"\b(?:frete|entrega|prazo|preco|estoque|produto|pedido)\s+(?:sera|foi)\b|"
+    r"\be (?:gratis|gratuit[oa]|imediat[oa]|garantid[oa]|de graca)\b"
+)
+
+
+def _nonfactual_request(sentence: str) -> bool:
+    """Bounded offers/scope/contact requests without an asserted result or value."""
+    return (
+        not re.search(r"(?<!\w)\d|r\$|%", sentence)
+        and not _ASSERTED_RESULT.search(sentence)
+        and bool(_OFFER_OR_SCOPE.search(sentence) or _REQUEST.search(sentence))
+    )
+
+
 _NUMBER = re.compile(
     r"(?<![\w.,])(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?![\w]|[.,]\d)"
 )
 _MONEY_BEFORE = re.compile(
-    r"(?:r\$|brl|reais|\bpor|\bcust\w*|\bprec\w*|\bvalor\w*|\bsai(?: a| por)?|\bapenas|\bsomente)"
+    r"(?:r\$|brl|reais|\bpor|\bcust(?:a|am|ava|avam|ara|ando)\b|"
+    r"\bprec\w*|\bvalor\w*|\bsai(?: a| por)?|\bapenas|\bsomente)"
     r"\s*(?:de\s+|e\s+|:\s*|=\s*)?(?:r\$\s*)?$"
 )
 _MONEY_AFTER = re.compile(r"^\s*(?:reais|brl|r\$)")
@@ -115,6 +147,11 @@ _UNIT_AFTER = re.compile(
     r"unidades?\b|itens?\b|pecas?\b|cm\b|mm\b|kg\b|g\b|m\b|polegadas?\b|watts?\b|w\b)"
 )
 _SENTENCE_SPLIT = re.compile(r"(?<!\d)[.!?;](?!\d)|\n")
+# Keep question marks attached to their clause for stock assertions.
+_STOCK_SENTENCE_SPLIT = re.compile(r"(?<!\d)[.!;](?!\d)|(?<=\?)\s*|\n")
+_BUDGET_BEFORE = re.compile(
+    r"(?:\bate|\bno maximo|\babaixo de|\borcamento(?: de)?|\blimite(?: de)?)\s*(?:r\$\s*)?$"
+)
 # Price wording (folded text): such a sentence quotes a product price, not a policy value.
 _PRICE_WORDING = re.compile(
     r"\bcust(?:a|am|ava|avam|ara|ando)\b|\bprecos?\b|\bsai(?:em|ra|rao)? (?:por|a)\b|"
@@ -232,7 +269,9 @@ def _named(products: list[_Product], folded_sentence: str) -> list[_Product]:
     return [p for p in products if p.name and p.name in folded_sentence]
 
 
-def _price_violation(text: str, records: list[ToolCallRecord], documents: Iterable[str]) -> bool:
+def _price_violation(
+    text: str, records: list[ToolCallRecord], documents: Iterable[str], current_message: str = ""
+) -> bool:
     """Product prices come only from this turn's catalog tools, never from documents.
 
     In a sentence that names a catalog product or uses price wording, every amount must
@@ -243,7 +282,21 @@ def _price_violation(text: str, records: list[ToolCallRecord], documents: Iterab
     products = _products(records)
     all_prices = frozenset().union(*(p.prices for p in products))
     doc_amounts = {amount for doc in documents for amount in money_amounts(doc)}
+    customer_amounts = set(money_amounts(current_message))
     for sentence in _SENTENCE_SPLIT.split(text):
+        # A customer budget can be repeated as a filter/header, never as the price
+        # of a named product or a sentence asserting what something costs.
+        folded = _fold(sentence)
+        sentence = folded
+        for match in reversed(list(_NUMBER.finditer(folded))):
+            prefix = folded[: match.start()]
+            if (
+                _to_decimal(match.group(1)) in customer_amounts
+                and _BUDGET_BEFORE.search(prefix)
+                and not _named(products, prefix)
+                and not _PRICE_WORDING.search(prefix)
+            ):
+                sentence = sentence[: match.start()] + " " + sentence[match.end() :]
         amounts = money_amounts(sentence)
         if not amounts:
             continue
@@ -298,6 +351,19 @@ _STOCK_QUANTITY = re.compile(
     r"\b(\d+(?:\.\d{3})*)\s*(?:unidades?|pecas?)\b|"
     r"\bestoque\s*(?:de|:|=)\s*(\d+(?:\.\d{3})*)\b"
 )
+# A stock word alone can be a topic or modifier, not an assertion. Link finite
+# assertion verbs to stock predicates within the clause. Preserve terse product
+# predicates ("Yamaha C40: disponível") as elliptical availability assertions.
+_STOCK_ASSERTION = re.compile(
+    r"\b(?:temos|tem|ha|existe[m]?|esta|estao|encontrei|encontramos)\b"
+    r"[^,;.!?\n]{0,100}\b(?:estoque|disponive(?:l|is)|indisponive(?:l|is)|"
+    r"esgotad[oa]s?|em falta)\b|\besgotou\b|"
+    r"\bdisponive(?:l|is) para pronta entrega\b"
+)
+_STOCK_ELLIPSIS = re.compile(
+    r"^\s*(?:[-*•]\s*)?(?:[\w -]*\b\w*\d\w*\s*:?\s*|[\w -]+:\s*)"
+    r"(?:disponive(?:l|is)|indisponive(?:l|is)|esgotad[oa]s?|em estoque|em falta)\b"
+)
 
 
 @dataclass(frozen=True)
@@ -313,8 +379,8 @@ def _stock_violation(
     """Validate explicit Portuguese stock claims against this turn's public tools.
 
     Quantities require a stock_quantity field (search summaries alone cannot back them).
-    Named clauses bind to that product; unnamed claims need unambiguous single-product
-    evidence. This deliberately bounded lexical check is not general entailment.
+    Named clauses bind to that product; unnamed availability requires unanimous evidence.
+    This deliberately bounded lexical check is not general entailment.
     """
     facts: dict[str, _Stock] = {}
     for record in records:
@@ -338,7 +404,17 @@ def _stock_violation(
         for document in documents
         for sentence in _SENTENCE_SPLIT.split(_fold(document))
     }
-    for sentence in _SENTENCE_SPLIT.split(_fold(text)):
+    for sentence in _STOCK_SENTENCE_SPLIT.split(_fold(text)):
+        if sentence.rstrip().endswith("?"):
+            continue
+        if _nonfactual_request(sentence):
+            continue
+        if not facts and not (
+            _STOCK_ASSERTION.search(sentence)
+            or _STOCK_QUANTITY.search(sentence)
+            or _STOCK_ELLIPSIS.search(sentence)
+        ):
+            continue
         # Split at product mentions so a valid quantity for B cannot justify a claim for A.
         mentions = sorted(
             (match.start(), match.end(), fact)
@@ -366,7 +442,7 @@ def _stock_violation(
         for clause, candidates in clauses:
             if "?" in clause:
                 continue
-            negative = bool(_STOCK_NEGATIVE.search(clause))
+            negative = bool(_STOCK_NEGATIVE.search(clause) or re.search(r"\besgotou\b", clause))
             positive = bool(_STOCK_POSITIVE.search(_STOCK_NEGATIVE.sub("", clause)))
             quantities = [
                 int((match.group(1) or match.group(2)).replace(".", ""))
@@ -374,12 +450,14 @@ def _stock_violation(
             ]
             if not (negative or positive or quantities):
                 continue
-            if len(candidates) != 1:
+            if not candidates or (quantities and len(candidates) != 1):
                 return True
-            fact = candidates[0]
-            if (positive and not fact.available) or (negative and fact.available):
+            if any(
+                (positive and not fact.available) or (negative and fact.available)
+                for fact in candidates
+            ):
                 return True
-            if any(quantity != fact.quantity for quantity in quantities):
+            if any(quantity != candidates[0].quantity for quantity in quantities):
                 return True
     return False
 
@@ -392,9 +470,10 @@ def output_violation(
     instructions: str,
     policy_text: str,
     documents: Iterable[str] = (),
+    current_message: str = "",
 ) -> str | None:
     """Name of the first violated output rule, or None. Any violation → low_confidence."""
-    if _price_violation(text, records, documents):
+    if _price_violation(text, records, documents, current_message):
         return "price"
     if _commercial_claim_violation(text, records):
         return "commercial_claim"
@@ -451,17 +530,64 @@ def admits_no_information(text: str) -> bool:
     return bool(_NO_INFO.search(_fold(text)))
 
 
-def has_factual_claim(text: str) -> bool:
-    """Greetings, thanks and clarification questions make no factual claim."""
-    for sentence in re.split(r"(?<=[.!?])\s+|\n", text.strip()):
+def _covered_by_persona(sentence: str, persona: Iterable[str]) -> bool:
+    """Cover configured phrases, allowing only greeting/identity glue around them.
+
+    Match contiguous phrases, not a bag of persona words: a configured founding
+    year must not authorize an unrelated delivery date or a discount of that value.
+    """
+    normalized = " ".join(re.findall(r"\w+", sentence))
+    phrases: set[str] = set()
+    for value in persona:
+        for part in _SENTENCE_SPLIT.split(_fold(value)):
+            words = re.findall(r"\w+", part)
+            for size in range(2, len(words) + 1):
+                phrases.update(" ".join(words[i : i + size]) for i in range(len(words) - size + 1))
+            if len(words) == 1:
+                phrases.add(words[0])
+    matched = False
+    for phrase in sorted(phrases, key=len, reverse=True):
+        normalized, count = re.subn(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", " ", normalized)
+        matched = matched or bool(count)
+    glue = {
+        "ola",
+        "bem",
+        "vindo",
+        "vinda",
+        "ao",
+        "a",
+        "o",
+        "sua",
+        "seu",
+        "loja",
+        "sou",
+        "eu",
+        "somos",
+        "assistente",
+        "do",
+        "da",
+        "de",
+        "em",
+        "e",
+        "especializada",
+        "especializado",
+    }
+    return matched and set(normalized.split()) <= glue
+
+
+def has_factual_claim(text: str, *, persona: Iterable[str] = ()) -> bool:
+    """Detect unsupported claims, excluding requests and configured introductions."""
+    # Placeholder indices are vault references, never factual numeric values.
+    text = TOKEN_RE.sub(" ", text)
+    persona = tuple(persona)
+    for sentence in _STOCK_SENTENCE_SPLIT.split(text.strip()):
         sentence = sentence.strip()
         if not sentence or sentence.endswith("?"):
             continue
         folded = _fold(sentence)
-        has_digit = bool(re.search(r"\d", sentence))
-        if _REQUEST.search(folded) and not has_digit:
+        if _nonfactual_request(folded) or _covered_by_persona(folded, persona):
             continue
-        if has_digit or _CLAIM_WORDS.search(folded):
+        if re.search(r"\d", folded) or _CLAIM_WORDS.search(folded):
             return True
     return False
 

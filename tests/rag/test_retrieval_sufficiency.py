@@ -126,3 +126,27 @@ async def test_chunks_flagged_suspicious_are_never_served(
         min_similarity=0,
     )
     assert {c.document_id for c in result.chunks} == {clean}
+
+
+@pytest.mark.parametrize(("similarity", "sufficient"), [(0.55, True), (0.25, False)])
+async def test_absent_location_does_not_veto_strong_vector_match(
+    session: AsyncSession,
+    two_tenants: tuple[uuid.UUID, uuid.UUID],
+    similarity: float,
+    sufficient: bool,
+) -> None:
+    """R4/F6: city absent, only one of three lexemes matches; strong vectors still pass.
+
+    Controlled vectors isolate the lexical gate; this is not real-embedding calibration.
+    """
+    tenant, _ = two_tenants
+    document_id = await _ingest(
+        session,
+        tenant,
+        "Entregas para outras cidades: frete calculado no checkout, conforme destino.",
+    )
+    provider = await _with_similarity(session, tenant, document_id, similarity)
+    result = await _search(session, tenant, "Entregas Dourados Maracaju", provider)
+    assert result.chunks
+    assert result.sufficient is sufficient
+    assert all("Dourados" not in chunk.content for chunk in result.chunks)

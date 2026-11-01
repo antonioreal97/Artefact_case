@@ -42,6 +42,7 @@ from app.models import (
     Conversation,
     Message,
     MessageSource,
+    Tenant,
     ToolExecution,
 )
 from app.models.handoff import HANDOFF_REASONS, HandoffRequest
@@ -55,6 +56,7 @@ from app.services.model_gateway import GuardedModelProvider, build_model_provide
 from app.services.privacy import (
     PrivacyBoundaryError,
     looks_restricted,
+    public_persona_values,
     redact_user_text,
     scan_outbound,
 )
@@ -323,7 +325,11 @@ class ChatService:
         handoffs = _Handoffs(ctx)
         public_values = agent_settings.public_contact_values or []
         # The assistant may introduce itself by its configured (public) name.
-        scan_allowlist = [*public_values, agent_settings.assistant_name]
+        store_name = await session.scalar(select(Tenant.name).where(Tenant.id == tenant_id))
+        scan_allowlist = [
+            *public_values,
+            *public_persona_values(agent_settings.assistant_name, store_name or ""),
+        ]
         decision = check_input(text)
         answer = SAFE_FALLBACK
         failure_reason: str | None = None
@@ -342,10 +348,15 @@ class ChatService:
             failure_reason = "privacy_guard"
         else:
             try:
-                async with asyncio.timeout(self.settings.model_timeout_seconds):
-                    provider = self.model_provider_factory(self.settings, public_values)
+                async with asyncio.timeout(self.settings.turn_timeout_seconds):
+                    provider = self.model_provider_factory(self.settings, scan_allowlist)
                     # Injected test/custom providers cannot bypass the boundary either.
-                    guarded = GuardedModelProvider(provider, scan_allowlist, known_values)
+                    guarded = GuardedModelProvider(
+                        provider,
+                        scan_allowlist,
+                        known_values,
+                        timeout_seconds=self.settings.model_timeout_seconds,
+                    )
                     agent = build_customer_service_agent(agent_settings)
                     result = await Runner.run(
                         agent,
@@ -408,6 +419,7 @@ class ChatService:
                 instructions=build_instructions(agent_settings),
                 policy_text=POLICY_TEXT,
                 documents=documents,
+                current_message=redacted,
             )
             if violation is not None:
                 logger.info("chat.output_rejected", rule=violation, correlation_id=safe_correlation)
@@ -429,7 +441,14 @@ class ChatService:
             answer, selected, tool_grounded = SAFE_FALLBACK, [], False
             await handoffs.request(failure_reason)
         elif model_ran and not selected and not tool_grounded:
-            if admits_no_information(answer) or has_factual_claim(answer):
+            tagline = (agent_settings.extra or {}).get("tagline", "")
+            persona = (
+                store_name or "",
+                agent_settings.assistant_name,
+                agent_settings.business_description or "",
+                tagline if isinstance(tagline, str) else "",
+            )
+            if admits_no_information(answer) or has_factual_claim(answer, persona=persona):
                 answer = NO_INFORMATION
                 await handoffs.request("no_information")
             # Otherwise: greeting/thanks/clarification question without factual claims.
