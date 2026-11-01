@@ -124,6 +124,8 @@ reason.
 | D-19 | 2026-11-01 | Disclose Claude Code, OpenAI Codex and their workflow in the root README, with explicit owner-confirmation placeholders where the tool record is missing | The case requires naming coding assistants and explaining their use; owner authorship of commits does not describe who generated the code | Case p.2; README “Uso de assistentes de código” |
 | D-20 | 2026-11-01 | Present multi-tenancy, generic uploads and WhatsApp as optional platform experiments; keep one seed-tenant/API walkthrough instead of rewriting before submission | R3 A-6 finds the breadth disproportionate to demonstrated case needs; clear scope and evidence have more value than a late rewrite | ADR 005; R3 §6; README |
 | D-21 | 2026-11-01 | Recommend a complete Docker run path, with an idempotent setup script, configurable loopback ports and a separate opt-in test image | Reproduce the whole application on the evaluator’s machine with only Docker/Compose; preserve the host Python/uv alternative and keep customer exports out of every image | Task D1; `scripts/docker_up.sh`; README “Executar com Docker”; Docker validation below |
+| D-22 | 2026-11-01 | Use LangChain only for provider-neutral chat/embedding adapters beneath the Agents SDK loop and mandatory PrivacyGuardedModel; preserve tools, vault, guardrails and hybrid retrieval | Owner decision L1 restores model-provider choice from ADR 001 without a LangGraph/retrieval rewrite; explicit factories avoid the top-level langchain/LangGraph dependency, and unavoidable transitive LangSmith tracing is forbidden in every environment | [ADR 006](adr/006-langchain-model-layer.md); L1 validation §4.4; no live provider calls |
+
 
 ## 4. Open items and known limitations
 
@@ -312,6 +314,62 @@ Not executed: OpenAI/live mode, a native Linux or Windows/WSL host run, PowerShe
 manual recipe, or the optional `linux/amd64` build. ShellCheck was unavailable. Existing
 O-8 intermittent behavior remains open; these passing results do not fix it or establish
 real-model quality. No open implementation questions remain for D1.
+
+### 4.4 LangChain adapter validation (L1, 2026-11-01)
+
+Implemented by OpenAI Codex under D-22 / [ADR 006](adr/006-langchain-model-layer.md).
+The coordinator explicitly revised the requested dependency plan after inspection:
+`langchain` would pull in LangGraph, so explicit factories replace `init_chat_model` /
+`init_embeddings`. Only four direct packages were added; `langsmith` is accepted solely
+as a transitive dependency, with startup tracing rejection and no application tracer.
+The ADR 001 cascade and provider benchmark remain unimplemented.
+
+| Dependency | Compatible range | Locked version |
+|---|---|---|
+| langchain-core | >=1.2.22,<2 | 1.7.3 |
+| langchain-openai | >=1,<2 | 1.7.3 |
+| langchain-anthropic | >=1,<2 | 1.7.7 |
+| langchain-ollama | >=1,<2 | 1.1.0 |
+| langsmith (transitive only) | resolved through langchain-core | 0.14.16 |
+
+`uv tree --depth 1`, `uv tree --invert --package langsmith` and parsed lockfile inspection
+confirmed no `langchain`, `langgraph*` or `langchain-postgres` package. Native OpenAI,
+Agents SDK, tools, guardrails, vault and retrieval behavior were preserved. Added 49 offline
+regression tests; the README assistant-disclosure row adds one documentation subtest.
+
+| Command / check | Measured result |
+|---|---|
+| `uv sync --frozen` | exit 0; locked environment reproducible |
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | all 161 files already formatted |
+| `uv run mypy app` | no issues in 64 source files, strict configuration |
+| `uv run pytest -q` | 652 passed, 124 subtests passed in 35.67s; no skips, warnings or xfails |
+| `uv run python -m scripts.eval_rag` | all hard gates pass: tenant leakage 0, privacy 0/23, harness errors 0; all six soft metrics unchanged at 100% |
+| `docker build --target runtime -t emporio-platform:l1 .` | exit 0; native linux/arm64 runtime built, original `emporio-platform:local` tag preserved |
+| `docker compose -p emporiol1 --profile test build test` | exit 0; test image built from the frozen lock |
+| `API_PORT=8040 DB_PORT=5474 REDIS_PORT=6420 docker compose -p emporiol1 --profile test run --rm test` | 652 passed, 124 subtests passed in 30.53s; no skips, warnings or xfails |
+| `docker compose -p emporiol1 down -v` | exit 0; removed only emporiol1 containers, network and volume |
+| Post-cleanup container inventory | test-rag-db-1/test-rag-redis-1 and all emporiov services, including API on :8020, remained running |
+
+Runtime image measurements used `docker image inspect IMAGE --format '{{.Id}} {{.Size}}'`
+on the same Docker Engine; the values below are its reported `Size` field in bytes,
+not `docker image ls`'s displayed disk-usage figure.
+
+| Image | Image ID | Size (bytes) |
+|---|---|---|
+| Before: emporio-platform:local | sha256:56e2c84863754c002cfef7281a587ebe9e7f8b7326ea89742ab42d643ac8099d | 158192570 |
+| After: emporio-platform:l1 | sha256:451aece5fcc4662b829fa0a719bc8ad7ae4c1419417d396d7b1f6001d225ff9d | 180471582 |
+| Delta | +14.08% | +22279012 (+21.25 MiB) |
+
+No real OpenAI, Anthropic or Ollama endpoint was called, and no live-provider quality,
+retention or performance validation was executed. LangChain streaming, SDK structured
+output and SDK handoff definitions are explicitly unsupported; the current ChatService
+uses non-streaming Runner.run and its existing local human-handoff tool. LangChain uses
+the global model string, not native per-tenant model overrides. Embeddings must remain
+1536-dimensional; new dimensions require a migration, and changing models requires
+reindexing. Provider terms/retention still require separate review. A-3/O-9 privacy limits
+and the known O-8 flake remain open; this run does not claim to resolve them.
+No implementation questions remain for L1, and no commit was created.
 
 ## 5. How to reproduce the evidence
 

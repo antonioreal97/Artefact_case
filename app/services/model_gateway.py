@@ -184,6 +184,13 @@ def build_model_provider(settings: Settings, allowlist: Iterable[str]) -> Guarde
         from app.services.fake_model import FakeCommerceModel
 
         return GuardedModelProvider(FakeCommerceModel(), allowlist)
+    if settings.llm_provider == "langchain":
+        from app.services.langchain_model import LangChainModel, create_chat_model, split_model
+
+        provider, _ = split_model(settings.langchain_chat_model)
+        return GuardedModelProvider(
+            LangChainModel(create_chat_model(settings), provider=provider), allowlist
+        )
     if not settings.openai_api_key or not settings.openai_api_key.get_secret_value().strip():
         raise ValueError("OPENAI_API_KEY is required")
     client = AsyncOpenAI(

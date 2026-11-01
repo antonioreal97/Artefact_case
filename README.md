@@ -129,14 +129,19 @@ diferente é rejeitada; não apague nem gere outra chave a cada execução.
 
 ### Modelo real dentro do Docker
 
-Configure no `.env` `OPENAI_API_KEY`, `LLM_PROVIDER=openai` e
-`EMBEDDING_PROVIDER=openai`, mantendo `OPENAI_TRACING_ENABLED=false`. Valem as
-opções e limitações de [modo com modelo real](#modo-com-modelo-real-opcional).
+Configure os provedores no `.env` conforme o [modo com modelo real](#modo-com-modelo-real-opcional):
+`LLM_PROVIDER=openai` preserva o adaptador nativo; `LLM_PROVIDER=langchain` usa
+`LANGCHAIN_CHAT_MODEL=provider:model`. Para embeddings, escolha `openai` ou `langchain`
+e seu modelo de 1536 dimensões. Mantenha `OPENAI_TRACING_ENABLED=false`,
+`LANGSMITH_TRACING=false` e `LANGCHAIN_TRACING_V2=false`.
+Para Ollama no host, use `OLLAMA_BASE_URL=http://host.docker.internal:11434`
+(o endereço `localhost` dentro do container aponta para o próprio container).
+
 **Antes de trocar hash por embeddings reais, execute `docker compose down -v`**
 na stack de demonstração e rode `./scripts/docker_up.sh` para migrar e indexar
-um banco novo; isso apaga os dados existentes e o novo seed faz chamadas cobradas.
-Reexecutar o seed sobre os vetores antigos não garante reindexação. O modo real
-não foi exercitado nesta validação.
+um banco novo; isso apaga os dados existentes e o novo seed pode fazer chamadas cobradas.
+Reexecutar o seed sobre os vetores antigos não garante reindexação. OpenAI, Anthropic
+e Ollama reais não foram executados nesta validação.
 
 ### Testes e avaliação dentro do Docker
 
@@ -278,27 +283,56 @@ conversa**; não há serialização nem idempotência para turnos concorrentes.
 
 ## Modo com modelo real (opcional)
 
-O adaptador implementado usa OpenAI, com defaults locais `gpt-5-mini` para chat e
-`text-embedding-3-small` com 1536 dimensões para embeddings. São escolhas de
-implementação, sem benchmark comparativo de qualidade, custo ou latência.
+Há três opções para chat: `fake` (determinístico), `openai` (adaptador nativo existente)
+e `langchain` (adaptadores OpenAI, Anthropic ou Ollama sob o mesmo loop do Agents SDK).
+Embeddings aceitam `hash`, `openai` e `langchain` (OpenAI ou Ollama; Anthropic não oferece
+embeddings neste adaptador). A escolha não altera as regras de [privacidade](SECURITY.md):
+`PrivacyGuardedModel` continua obrigatório, sem tools hospedadas, estado remoto ou tracing.
+Veja a decisão e os limites no [ADR 006](docs/adr/006-langchain-model-layer.md).
 
-Para habilitá-lo, configure `OPENAI_API_KEY` por variável de ambiente ou arquivo
-`.env` ignorado pelo Git, selecione `LLM_PROVIDER=openai` e
-`EMBEDDING_PROVIDER=openai`, mantendo tracing desligado. As opções
-`OPENAI_CHAT_MODEL` e `OPENAI_EMBEDDING_MODEL` permitem configuração explícita.
-A escolha do provedor não altera as restrições de [privacidade](SECURITY.md).
+Exemplo LangChain com OpenAI, em variáveis de ambiente ou `.env` ignorado pelo Git:
+
+```dotenv
+LLM_PROVIDER=langchain
+LANGCHAIN_CHAT_MODEL=openai:gpt-5-mini
+EMBEDDING_PROVIDER=langchain
+LANGCHAIN_EMBEDDING_MODEL=openai:text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
+# OPENAI_API_KEY=<sua chave>
+OPENAI_TRACING_ENABLED=false
+LANGSMITH_TRACING=false
+LANGCHAIN_TRACING_V2=false
+```
+
+Para Anthropic, troque `LANGCHAIN_CHAT_MODEL=anthropic:<modelo-disponível-na-sua-conta>`
+e defina `ANTHROPIC_API_KEY`; mantenha um provedor separado de embeddings, por exemplo
+OpenAI com sua chave. Para Ollama local, use `LANGCHAIN_CHAT_MODEL=ollama:<modelo-com-tools>`
+e `OLLAMA_BASE_URL=http://localhost:11434`; no Docker, use
+`http://host.docker.internal:11434`. Instale previamente o modelo no Ollama.
+`LANGCHAIN_EMBEDDING_MODEL=ollama:<modelo-de-1536-dimensões>` exige vetores dessa dimensão;
+modelos de outras dimensões exigem nova migração e reindexação, fora deste escopo.
+Os nomes entre `<...>` são placeholders: a compatibilidade real dos modelos não foi testada.
+
+O caminho nativo continua disponível com `LLM_PROVIDER=openai`, `EMBEDDING_PROVIDER=openai`,
+`OPENAI_CHAT_MODEL=gpt-5-mini` e `OPENAI_EMBEDDING_MODEL=text-embedding-3-small`.
+Os defaults são escolhas de implementação, sem benchmark de qualidade, custo ou latência.
+O adaptador LangChain usa o modelo global `LANGCHAIN_CHAT_MODEL`; o campo nativo
+`chat_model` do tenant não substitui essa escolha. Streaming LangChain não é implementado:
+a API atual usa `Runner.run`, sem streaming. Falhas e timeouts mantêm o fallback/handoff local.
 
 **Não basta trocar as variáveis sobre um banco preenchido com hash embeddings.**
-Os vetores podem ter a mesma dimensão e espaços incompatíveis. Para uma avaliação
-isolada, o harness com opção `--live` cria um banco descartável e indexa com o
-provedor selecionado; exige a chave e gera chamadas cobradas. Para a API, use um
-banco novo com migrações e seed já configurados para OpenAI, ou reprocesse todos
-os documentos com esse provedor antes de servir consultas. Reexecutar apenas o
-seed pode pular documentos já concluídos; não há fingerprint de geração dos vetores.
+Os vetores podem ter a mesma dimensão e espaços incompatíveis. Para a API, use um
+banco novo com migrações e seed já configurados para o provedor escolhido, ou reprocesse
+todos os documentos antes de servir consultas. Reexecutar apenas o seed pode pular
+documentos já concluídos; não há fingerprint de geração dos vetores. O harness `--live`
+existente valida o caminho nativo OpenAI, cria banco descartável e gera chamadas cobradas;
+não é uma avaliação comparativa dos adaptadores LangChain.
 
-**Esse modo não foi executado neste ambiente.** Não há resultado de modelo real,
-calibração dos limiares para embeddings reais ou confirmação operacional dos
-controles contratuais de retenção do provedor. A demonstração entregue usa fake/hash.
+**Nenhum provedor real foi chamado nesta tarefa**, incluindo Ollama local. A validação
+usou fakes de LangChain e fake/hash; não mede qualidade, calibração de limiares nem retenção.
+Antes de uso real, verifique os termos, retenção e controles de cada provedor; `store=False`
+não substitui essa verificação. Qualquer flag LangSmith de tracing habilitada bloqueia a
+inicialização em todos os ambientes.
 
 ## Decisões técnicas
 
@@ -306,7 +340,7 @@ controles contratuais de retenção do provedor. A demonstração entregue usa f
 |---|---|
 | Um agente com OpenAI Agents SDK | Sete ferramentas cobrem um único domínio; o loop limitado evita criar agentes especialistas sem necessidade. Um `GuardedModel` inspeciona cada payload antes do provedor, força `store=False` e bloqueia estado hospedado. |
 | FastAPI como interface | HTTP permite reproduzir conversas com curl e exercitar autenticação, erros e isolamento; uma interface visual não é necessária para avaliar o agente. |
-| OpenAI ou fake por configuração | O SDK integra o adaptador real; fake permite testes sem custo externo e falhas reproduzíveis. Não há adaptadores locais, Anthropic ou Google implementados nesta branch. |
+| OpenAI nativo, LangChain ou fake por configuração | LangChain adapta chat OpenAI/Anthropic/Ollama e embeddings OpenAI/Ollama; o loop segue no Agents SDK e a busca híbrida não muda. Factories explícitas evitam instalar LangGraph; LangSmith é apenas dependência transitiva, com tracing proibido. Validado offline, sem chamadas reais. |
 | Tools para fatos operacionais | Preço, estoque, promoção, pedido e cliente vêm de consultas tipadas ao `CommerceBackend`; o modelo não gera SQL nem usa RAG para inferir esses dados. |
 | RAG somente documental | Políticas, FAQ e manuais precisam de trechos e referências; o seed contém o PDF da loja. Embeddings não substituem verificações de identidade. |
 | Busca híbrida + RRF | pgvector/cosseno captura similaridade e full-text em português captura termos exatos; Reciprocal Rank Fusion combina posições, sem somar escalas incompatíveis. A superioridade sobre busca lexical não foi medida. |
@@ -465,6 +499,7 @@ e propôs os commits. As ferramentas identificadas por frente são:
 | X1 — conversas de exemplo, filtro de catálogo e validação de estoque | OpenAI Codex |
 | X2 — este README e alinhamento documental | OpenAI Codex |
 | D1 — execução completa em Docker | OpenAI Codex |
+| L1 — camada de modelos com LangChain | OpenAI Codex |
 
 O fluxo foi: **contratos → frentes paralelas → revisão separada (R1) → testes
 adversariais (R2) → avaliação com gates (G1) → correções pelos responsáveis

@@ -30,8 +30,15 @@ class Settings(BaseSettings):
 
     # --- model providers ---------------------------------------------------------------
     # "fake" providers are deterministic and allowed only when app_env != "prod".
-    llm_provider: Literal["openai", "fake"] = "openai"
-    embedding_provider: Literal["openai", "hash"] = "openai"
+    llm_provider: Literal["openai", "langchain", "fake"] = "openai"
+    embedding_provider: Literal["openai", "langchain", "hash"] = "openai"
+    langchain_chat_model: str | None = None
+    langchain_embedding_model: str | None = None
+    # Read from both the environment and .env, even for native/fake providers.
+    langsmith_tracing: bool = False
+    langchain_tracing_v2: bool = False
+    anthropic_api_key: SecretStr | None = None
+    ollama_base_url: str = "http://localhost:11434"
     openai_api_key: SecretStr | None = None
     openai_chat_model: str = "gpt-5-mini"
     openai_embedding_model: str = "text-embedding-3-small"
@@ -75,6 +82,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _guard_prod(self) -> Settings:
+        if self.langsmith_tracing or self.langchain_tracing_v2:
+            raise ValueError("LANGSMITH_TRACING and LANGCHAIN_TRACING_V2 must be OFF (privacy)")
+        for provider, model, name in (
+            (self.llm_provider, self.langchain_chat_model, "LANGCHAIN_CHAT_MODEL"),
+            (self.embedding_provider, self.langchain_embedding_model, "LANGCHAIN_EMBEDDING_MODEL"),
+        ):
+            if provider == "langchain" and (not model or not model.strip()):
+                raise ValueError(f"{name} is required when provider is langchain")
         if self.app_env == "prod":
             if self.llm_provider == "fake" or self.embedding_provider == "hash":
                 raise ValueError("Deterministic fake providers are not allowed in prod")

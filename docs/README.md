@@ -9,9 +9,11 @@ This folder contains both the **original `main` design** and evidence for the
 
 The branch implements FastAPI, one OpenAI Agents SDK tool loop, guarded model access,
 PostgreSQL/pgvector hybrid document retrieval, typed commerce tools, Redis vault/state,
-seed/import commands, tests and evaluation. The configured providers are **OpenAI or fake**
-for chat and **OpenAI or hash** for embeddings; a provider-neutral multi-provider runtime
-is an original design goal, not an implemented feature here.
+seed/import commands, tests and evaluation. Chat supports native **OpenAI**, **fake** and
+**LangChain** adapters (OpenAI/Anthropic/Ollama); embeddings support native **OpenAI**,
+**hash** and **LangChain** (OpenAI/Ollama, fixed at 1536 dimensions). Provider-neutral
+model/embedding selection is implemented, with no live-provider validation; the original
+ADR 001 cascade and comparative benchmark remain unimplemented.
 
 Multi-tenancy, generic uploads and WhatsApp are optional experiments beyond the case.
 The demonstrated path is one seed tenant over the API with fake/hash providers. No live
@@ -20,6 +22,7 @@ model/embedding validation has been completed. The second tenant is synthetic an
 | Document | Purpose |
 |---|---|
 | [ADR 005](adr/005-multi-tenant-platform-branch.md) | Branch stack and explicit deviations from the original architecture/token policy |
+| [ADR 006](adr/006-langchain-model-layer.md) | LangChain model/embedding adapters under the existing Agents SDK loop and privacy boundary; offline validation only |
 | [Platform contracts](platform/contracts.md) | Shared interfaces and module ownership |
 | [Development process](development-process.md) | Accepted fixes, decisions, current open items and dated integration results (§4.2) |
 | [Security policy](../SECURITY.md) / [ADR 002](adr/002-no-pii-external-egress.md) | Normative no-raw-PII boundary, rule-based detection limits and reversible-token implementation divergence |

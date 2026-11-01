@@ -13,6 +13,7 @@ import unicodedata
 from collections import Counter
 from typing import Protocol
 
+from langchain_core.embeddings import Embeddings
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 from redis.asyncio import Redis
 
@@ -117,6 +118,71 @@ class OpenAIEmbeddingProvider:
         return (await self.embed_documents([text]))[0]
 
 
+class LangChainEmbeddingProvider:
+    """Async embeddings with the same public-payload boundary as native OpenAI."""
+
+    def __init__(
+        self, settings: Settings, *, client: Embeddings | None = None, batch_size: int = 64
+    ) -> None:
+        from app.services.langchain_model import split_model
+
+        provider, name = split_model(settings.langchain_embedding_model, embeddings=True)
+        self.model_name = f"langchain:{settings.langchain_embedding_model}"
+        self.dimensions = settings.embedding_dimensions
+        self.batch_size = max(1, batch_size)
+        self.timeout = settings.model_timeout_seconds
+        if client is not None:
+            self.client = client
+        elif provider == "openai":
+            from langchain_openai import OpenAIEmbeddings
+
+            self.client = OpenAIEmbeddings(
+                model=name,
+                openai_api_key=settings.openai_api_key,
+                dimensions=self.dimensions,
+                request_timeout=self.timeout,
+                max_retries=0,
+            )
+        else:
+            from langchain_ollama import OllamaEmbeddings
+
+            self.client = OllamaEmbeddings(
+                model=name,
+                base_url=settings.ollama_base_url,
+                client_kwargs={"timeout": self.timeout},
+            )
+
+    def _validate(self, vectors: list[list[float]], expected: int) -> None:
+        if len(vectors) != expected:
+            raise ValueError("Invalid LangChain embedding response count")
+        for vector in vectors:
+            if len(vector) != self.dimensions:
+                raise ValueError(
+                    f"LangChain embedding dimension mismatch: expected {self.dimensions}, "
+                    f"received {len(vector)}; a different dimension requires a new migration"
+                )
+            if not all(math.isfinite(value) for value in vector):
+                raise ValueError("Invalid non-finite LangChain embedding")
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        assert_external_payload_safe(texts, classification=DataClassification.PUBLIC)
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), self.batch_size):
+            batch = texts[start : start + self.batch_size]
+            async with asyncio.timeout(self.timeout):
+                result = await self.client.aembed_documents(batch)
+            self._validate(result, len(batch))
+            vectors.extend(result)
+        return vectors
+
+    async def embed_query(self, text: str) -> list[float]:
+        assert_external_payload_safe([text], classification=DataClassification.PUBLIC)
+        async with asyncio.timeout(self.timeout):
+            result = await self.client.aembed_query(text)
+        self._validate([result], 1)
+        return result
+
+
 class QueryCache(Protocol):
     async def get(self, key: str) -> str | bytes | None: ...
     async def set(self, key: str, value: str, *, ex: int) -> object: ...
@@ -190,6 +256,8 @@ def get_embedding_provider(settings: Settings) -> EmbeddingProvider:
     provider: EmbeddingProvider = (
         HashEmbeddingProvider(settings)
         if settings.embedding_provider == "hash"
+        else LangChainEmbeddingProvider(settings)
+        if settings.embedding_provider == "langchain"
         else OpenAIEmbeddingProvider(settings)
     )
     redis = Redis.from_url(
