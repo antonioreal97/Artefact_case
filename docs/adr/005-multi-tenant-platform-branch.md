@@ -26,6 +26,31 @@ only inside tests to prove isolation.
 - Commerce data lives in tenant-scoped Postgres tables seeded from the CSV export and is
   reached only through the `CommerceBackend` protocol.
 
+## Scope and privacy qualification (2026-11-01)
+
+Multi-tenancy, generic uploads and WhatsApp are **optional platform experiments**, not
+requirements of the Empório da Música case. The submission's supported walkthrough is one
+seed tenant over the HTTP API, with deterministic providers; no real-model quality claim or
+measured advantage over the smaller ADR 003/004 design is established (A-4 / A-6).
+
+Tokenization is **pseudonymization with scoped linkability, not anonymization**. Tokens are
+sequential per conversation, not random; repeated values reuse their placeholder. The
+mapping stays in local Redis, keyed by tenant and conversation, with a sliding 24-hour TTL.
+Final reveal is limited to current-turn values or an authorized order lookup in that turn.
+
+This implemented token flow diverges from the original random-token and external reversible-
+pseudonym restrictions in [SECURITY.md](../../SECURITY.md) and
+[ADR 002](002-no-pii-external-egress.md). The platform decision did not remove those rules;
+the divergence remains explicit under A-3. Raw PII, mappings and customer records must never
+reach external models or logs. Tokenization does not make arbitrary restricted free text
+eligible for external processing.
+
+Detection is rule-based, with known tenant values and residual-cue checks. Ambiguous
+restricted turns must fail closed to local handling or human handoff, but unknown lower-case
+names without those cues can pass undetected (O-9). Multiple scans do not prove absence of
+PII. See [the architecture review](../reviews/architecture-review.md) for the structured-input
+boundary recommended to close the gap; this documentation round changes no runtime rule.
+
 ## Consequences
 
 Heavier runtime (Postgres, Redis, Docker) than ADR 003. The PII rule means order answers

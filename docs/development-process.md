@@ -49,6 +49,9 @@ use the same labels:
 | R2 | Adversarial black-box tests (tests only) | `tests/adversarial/` |
 | E2 / F2 | Review fixes, split along the E/F ownership line | as E / as D+C+F+infra |
 | G1 | RAG/agent evaluation harness | `scripts/eval_rag.py`, `evals/`, `tests/eval/` |
+| E3 / F3 | Adversarial regression fixes and retrieval sufficiency | agent / platform ownership as above |
+| R3 | Independent architecture review (report only) | `docs/reviews/architecture-review.md` |
+| X1 / X2 | Saved conversation examples / submission README and documentation alignment | examples and demo generator / root README and scoped docs |
 
 **Why:** exclusive ownership means no two changes touch the same file at the same time.
 Every change has one clear owner. Review findings can be routed to the owner of the
@@ -118,6 +121,8 @@ reason.
 | D-16 | 2026-11-01 | Amounts in retrieved documents may be quoted only as policy values (fees, thresholds, percentages, deadlines) in sentences that name no catalog product. Any amount next to a product must match this turn's catalog tool result | Two requirements pull in opposite directions. The evaluation needs policy amounts from the PDF (Pix discount, minimum installment, free-shipping threshold) to pass the guardrail. The adversarial suite showed that accepting every document amount lets a planted document set a product's price (FINDING-5). Splitting by "names a product or not" keeps both | E3 task; FINDING-5; eval cases `rag-pix-discount`, `rag-free-shipping` |
 | D-17 | 2026-11-01 | Chunks flagged as suspicious at ingestion are excluded from retrieval, and blanket commercial claims need backing from a catalog tool result | The suspicious-instruction flag was computed but never used. A document must not be able to make store-wide commercial promises (FINDING-4) | E3 task; FINDING-4 |
 | D-18 | 2026-11-01 | Retrieval is "sufficient" only when the best chunk reaches the similarity threshold, or when a lexical hit covers enough of the question. Lexical coverage lowers the similarity floor for that chunk. `search_knowledge` withholds insufficient sources from the model | Fixes the side effect of D-07 (O-1) without losing its recall gain. It also explains O-6: a correct chunk with strong term overlap but weak embedding similarity is kept, while an off-topic question with incidental term overlap is not | `app/rag/retrieval.py`, `tests/rag/test_retrieval_sufficiency.py` |
+| D-19 | 2026-11-01 | Disclose Claude Code, OpenAI Codex and their workflow in the root README, with explicit owner-confirmation placeholders where the tool record is missing | The case requires naming coding assistants and explaining their use; owner authorship of commits does not describe who generated the code | Case p.2; README “Uso de assistentes de código” |
+| D-20 | 2026-11-01 | Present multi-tenancy, generic uploads and WhatsApp as optional platform experiments; keep one seed-tenant/API walkthrough instead of rewriting before submission | R3 A-6 finds the breadth disproportionate to demonstrated case needs; clear scope and evidence have more value than a late rewrite | ADR 005; R3 §6; README |
 
 ## 4. Open items and known limitations
 
@@ -133,6 +138,18 @@ reason.
 | O-8 | Intermittent test `test_embedding_failure_is_safe`: about 4% of random UUID hex strings match the egress phone pattern, so the turn is blocked as `privacy_guard`. It fails safe, but it is a false positive of the egress scanner | open |
 | O-9 | Lower-case names typed outside a self-introduction and outside the tenant's customer list are not detected (rule-based detection) | open, documented limitation |
 | O-10 | The commercial-claim output rule is lexical and conservative: it can block a correct sentence that negates a promotion | open, fails safe |
+| O-11 | A-2: `grounded` checks evidence presence and selected lexical facts, not full claim consistency (stock, dates, policy conditions); need typed evidence/local rendering and contradiction regressions | open |
+| O-12 | A-3: sequential reversible conversation tokens diverge from the original random-token/no-reversible-egress policy; rule-based detection cannot establish universal no-raw-PII coverage (also O-9) | wording aligned in X2; structured external-input boundary and runtime/policy gap remain open |
+| O-13 | A-4: fake routing, single-turn evaluation and soft quality metrics do not validate live tool choice, multi-turn behavior, tone or policy conflicts (also O-4) | open; require held-out real/local-model evidence before quality claims |
+| O-14 | A-5: concurrent turns and retries have no conversation lock, vault CAS or coherent transaction/idempotency boundary | open; walkthrough restricted to one active turn per conversation |
+| O-15 | A-7: document versions lack embedding/extractor/chunker generation identity; reprocessing can remove serving chunks before success | open; offline-to-live reindex requirement documented |
+| O-16 | A-8: similarity/lexical coverage is not answer completeness; source authority, contradictions, rule/exception structure, OCR and complex layouts remain limited | open; calibrate on representative documents and real embeddings |
+| O-17 | A-9: ChatService combines persistence, orchestration, evidence validation and rendering; lower-layer dependencies and mutable audit dictionaries leak across boundaries | open; refactor around typed turn/evidence state and explicit transactions |
+| O-18 | A-10: chat/handoff scan tenant customer data, and catalog filtering loads complete tenant datasets | open; seed-scale only, measure before larger tenants |
+| O-19 | A-11: SQL tenant filters lack RLS/composite tenant relationship enforcement; direct HTTP chat lacks end-user/session binding | open; use trusted-server credentials and add signed session ownership |
+| O-20 | A-12: enqueue/delivery are not durable completion; Redis has no Compose volume, WhatsApp acknowledges failures and uses global credentials | open; optional channel only, inbox/outbox and pending-ingestion recovery needed |
+| O-21 | A-13: ordinary turns do not consistently update conversation activity; current/failed document retention and deletion propagation are incomplete | open; define and test lifecycle semantics |
+| O-22 | A-14: prompt version alone cannot reproduce effective configuration; usage/cost and distinct model failures are missing, metrics are per-process | documentation aligned in X2; operational observability remains open |
 
 ### 4.1 Accepted results
 
@@ -153,7 +170,7 @@ reason.
 | no_answer_safety | 1/2 | 1/2 (O-1) |
 
 - Limitations the fix pass reported:
-  - names typed in lower case outside a self-introduction or the known-customer list are not detected, so the residual identity cues fail closed instead;
+  - names typed in lower case outside a self-introduction or the known-customer list are not detected; recognized residual identity cues fail closed, but names without those cues can still pass (R3 A-3 / O-9);
   - bare numbers in messages that mention an order are over-tokenized;
   - a tenant document containing a non-public street address would be blocked by the egress scanner.
 
@@ -202,14 +219,37 @@ reason.
 - FINDING-4: implemented as decided in D-17.
 - O-1 and O-6: fixed by D-18.
 
+**R3: independent architecture review (accepted 2026-11-01; snapshot `407d846`).**
+- [Full report](reviews/architecture-review.md): a substantial, tested platform experiment,
+  with missing case deliverables and material gaps in behavioral evidence and guarantees.
+- Scores (out of 5): requirement fit **3**, proportionality **2**, layering **3**, agent
+  design **3**, privacy architecture **3**, RAG **3**, multi-tenancy/operations **2**,
+  quality strategy **4**, documentation **2**. These assess the reviewed snapshot, not
+  production certification or a re-score after documentation fixes.
+- Highest findings: missing README/examples (A-1), evidence presence mistaken for factual
+  grounding (A-2), heuristic PII detection and inconsistent token policy (A-3), no live
+  model evidence (A-4), and concurrent-turn state integrity (A-5).
+- R3 independently reproduced 572 passing tests and 114 subtests, mypy clean on 63 files,
+  and all deterministic evaluation gates/soft metrics passing; it made no paid API calls.
+- This submission round addresses A-1 through X1's saved examples and X2's root README /
+  assistant disclosure; clarifies A-3 wording without claiming a runtime fix; bounds the
+  optional platform scope for A-6 (D-20); and aligns historical/current docs for A-14.
+- A-2 through A-14 runtime/evidence limits remain tracked in O-4, O-8–O-22 as applicable.
+  The root README also documents serial demo turns and offline-to-live reindexing. No
+  late platform rewrite or production-readiness claim follows from accepting the review.
+
 ### 4.2 State at integration (2026-11-01)
+
+**Re-measured after integrating X1 and X2 (2026-11-01).** The previous snapshot `407d846` had
+572 tests. In-flight checks taken while parallel workstreams were still editing are not
+recorded as results. O-8 remains an intermittent known failure.
 
 | Check | Result |
 |---|---|
 | `uv run ruff check .` / `uv run ruff format --check .` | clean (whole repo) |
 | `uv run mypy app` | no issues in 63 files |
-| `uv run pytest -q` | 572 passed, 114 subtests passed, 0 xfail, on two consecutive runs |
-| `uv run python -m scripts.eval_rag` (deterministic) | all hard gates pass (leakage 0, privacy 0/23, errors 0) |
+| `uv run pytest -q` | 603 passed, 123 subtests passed, 0 xfail, on two consecutive runs |
+| `uv run python -m scripts.eval_rag` (deterministic) | all hard gates pass (leakage 0, privacy 0/23, errors 0); all six soft metrics 100% |
 
 Evaluation progression over the fix waves:
 

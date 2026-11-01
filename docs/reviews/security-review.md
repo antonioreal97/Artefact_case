@@ -1,3 +1,10 @@
+> **Status — 2026-11-01:** Historical R1 review of the snapshot identified below, before
+> the accepted E2/F2/E3/F3 fixes. Findings and line numbers are preserved as review evidence,
+> not a list of all currently open vulnerabilities. See
+> [development process §4.2](../development-process.md#42-state-at-integration-2026-11-01)
+> for the last accepted integration (`407d846`), §4.1 for fix acceptance and §4 for open items.
+> [R3](architecture-review.md) records remaining architectural limits; X1 integration still needs remeasurement.
+
 # Independent security & architecture review (Task R1)
 
 - Scope: `app/**`, `scripts/`, `alembic/`, `Dockerfile`, `docker-compose.yml`, `.env.example`,

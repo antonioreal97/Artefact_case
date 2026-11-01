@@ -1,3 +1,9 @@
+> **Status — 2026-11-01:** Historical G1 report from before E2/E3 fixes. The results and
+> diagnoses below describe that snapshot, not the current implementation. See
+> [development process §4.2](../docs/development-process.md#42-state-at-integration-2026-11-01)
+> for the last accepted integration (`407d846`) and pending remeasurement after X1.
+> Deterministic pipeline metrics do not establish real-model quality; live evaluation is pending.
+
 # RAG/agent evaluation report (Task G1)
 
 Run: `uv run python -m scripts.eval_rag [--live] [--json-out PATH] [--case ID ...]`
