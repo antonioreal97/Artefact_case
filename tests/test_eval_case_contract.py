@@ -3,7 +3,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = ROOT / "docs" / "evals" / "cases.jsonl"
 SCHEMA_PATH = ROOT / "docs" / "evals" / "case.schema.json"
@@ -54,9 +53,7 @@ class EvalCaseContractTests(unittest.TestCase):
 
     def test_critical_privacy_cases_exist(self):
         critical_privacy = [
-            case
-            for case in self.cases
-            if case["category"] == "order_privacy" and case["critical"]
+            case for case in self.cases if case["category"] == "order_privacy" and case["critical"]
         ]
         self.assertGreaterEqual(len(critical_privacy), 4)
         self.assertTrue(
@@ -81,4 +78,3 @@ class EvalCaseContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

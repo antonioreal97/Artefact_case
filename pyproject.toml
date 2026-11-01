@@ -1,0 +1,78 @@
+[project]
+name = "emporio-agent"
+version = "0.2.0"
+description = "Multi-tenant customer-service agent platform (FastAPI + OpenAI Agents SDK + pgvector RAG)"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pgvector>=0.3.6",
+    "redis>=5.2",
+    "arq>=0.26",
+    "openai>=1.60",
+    "openai-agents>=0.3",
+    "tiktoken>=0.8",
+    "pypdf>=5.1",
+    "python-docx>=1.1",
+    "python-multipart>=0.0.18",
+    "httpx>=0.28",
+    "structlog>=24.4",
+    "langchain-core>=1.2.22,<2",
+    "langchain-openai>=1,<2",
+    "langchain-anthropic>=1,<2",
+    "langchain-ollama>=1,<2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "src/emporio_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+markers = [
+    "integration: requires the Postgres+pgvector test database (docker compose up db)",
+    "openai_live: calls the real OpenAI API; disabled unless RUN_OPENAI_LIVE_TESTS=1",
+]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "RUF"]
+ignore = ["S101", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B"]
+"scripts/**" = ["S"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = ["src"]
+packages = ["app"]
+ignore_missing_imports = true
+warn_unused_ignores = false

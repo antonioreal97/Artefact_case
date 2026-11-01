@@ -2,7 +2,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 
@@ -48,7 +47,10 @@ class DocumentationContractTests(unittest.TestCase):
     def test_restricted_data_is_not_documented_as_paid_fallback_eligible(self):
         architecture = (DOCS / "architecture.md").read_text(encoding="utf-8").casefold()
         self.assertNotIn("sensitive turns to the best paid model", architecture)
-        self.assertIn("restricted data cannot", (DOCS / "technical-design.md").read_text(encoding="utf-8").casefold())
+        self.assertIn(
+            "restricted data cannot",
+            (DOCS / "technical-design.md").read_text(encoding="utf-8").casefold(),
+        )
 
     def test_authoritative_security_policy_is_linked(self):
         index = (DOCS / "README.md").read_text(encoding="utf-8")

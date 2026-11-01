@@ -1,77 +1,80 @@
-# Emporio da Musica Agent Documentation
+# Empório da Música — documentation index
 
-This folder is the design contract for the Emporio da Musica customer-support agent.
-It is intentionally provider-neutral: the same business logic, tools, context and tests
-must run against a local model, OpenAI, Anthropic or Google.
+Start with the [root README](../README.md) for the runnable store-agent walkthrough,
+technical rationale, interaction examples, limitations and coding-assistant disclosure.
+This folder contains both the **original `main` design** and evidence for the
+**implemented `test-rag` platform experiment**. They are not interchangeable specifications.
 
-## Document control
+## Current branch: `test-rag`
 
-| Field | Value |
+The branch implements FastAPI, one OpenAI Agents SDK tool loop, guarded model access,
+PostgreSQL/pgvector hybrid document retrieval, typed commerce tools, Redis vault/state,
+seed/import commands, tests and evaluation. Chat supports native **OpenAI**, **fake** and
+**LangChain** adapters (OpenAI/Anthropic/Ollama); embeddings support native **OpenAI**,
+**hash** and **LangChain** (OpenAI/Ollama, fixed at 1536 dimensions). Provider-neutral
+model/embedding selection is implemented, with no live-provider validation; the original
+ADR 001 cascade and comparative benchmark remain unimplemented.
+
+Multi-tenancy, generic uploads and WhatsApp are optional experiments beyond the case.
+The demonstrated path is one seed tenant over the API with fake/hash providers. No live
+model/embedding validation has been completed. The second tenant is synthetic and test-only.
+
+| Document | Purpose |
 |---|---|
-| Baseline | 0.1 pre-implementation |
-| Date | 2026-10-31 |
-| Status | Ready for owner review; architecture validation pending |
-| Language | English documentation; PT-BR agent behavior |
-| Change rule | Update requirements, design, tests and traceability together |
+| [ADR 005](adr/005-multi-tenant-platform-branch.md) | Branch stack and explicit deviations from the original architecture/token policy |
+| [ADR 006](adr/006-langchain-model-layer.md) | LangChain model/embedding adapters under the existing Agents SDK loop and privacy boundary; offline validation only |
+| [Platform contracts](platform/contracts.md) | Shared interfaces and module ownership |
+| [Development process](development-process.md) | Accepted fixes, decisions, current open items and dated integration results (§4.2) |
+| [Security policy](../SECURITY.md) / [ADR 002](adr/002-no-pii-external-egress.md) | Normative no-raw-PII boundary, rule-based detection limits and reversible-token implementation divergence |
+| [Architecture review R3](reviews/architecture-review.md) | Review of `407d846`, case fit and remaining limitations |
+| [Root evaluation cases](../evals/rag_eval_cases.jsonl) | Cases used by the implemented evaluation harness |
+| [Conversation examples](../examples/conversations/) (root README, section "Exemplos de interação") | Five saved deterministic demonstrations |
 
-## Recommendation in one paragraph
+After X1 integration (2026-11-01): 603 tests and 123 subtests passed on two runs,
+mypy clean on 63 app files, and all deterministic evaluation gates/soft metrics passed.
+The known O-8 flake remains open.
+See [development-process.md](development-process.md) §4.2, not an older report,
+for the integration checkpoint. Passing fake-mode checks does not establish LLM quality.
 
-Build one orchestrator with deterministic tools, a provider-neutral model gateway and a
-risk-aware, data-aware router. Resolve facts, authorization and privacy in code. Restricted
-customer/order turns remain deterministic or local; paid APIs receive only guarded public
-or minimized internal data. Use a local model only on task slices it has passed. Keep a
-paid-optimized profile available. The hybrid profile ships only if it is non-inferior on
-quality and materially cheaper after local infrastructure cost.
+## Historical evidence for this branch
 
-## Recommended reading order
+- [Security review R1](reviews/security-review.md): findings before E2/F2/E3/F3 fixes;
+  original snapshot and line numbers are retained, with a status banner.
+- [Adversarial findings R2](../tests/adversarial/FINDINGS.md): the original six findings and
+  strict-xfail results; acceptance and later fixes are recorded in development process §4.1.
+- [Evaluation report G1](../evals/REPORT.md): initial soft-metric failures before E2/E3;
+  its banner points to the later integration evidence. Do not read its old scores as current.
 
-1. [Project context](project-context.md): problem, users, scope, requirements and success criteria.
-2. [Solution architecture](architecture.md): components, flows, routing, trust and deployment boundaries.
-3. [Technology stack](technology-stack.md): selected tools, non-selections and versioning policy.
-4. [Technical design](technical-design.md): modules, state machine, interfaces, errors and configuration.
-5. [Data contracts](data-contracts.md): schemas, relationships, normalization and data quality.
-6. [Context specification](context-spec.md): source precedence, persona, tools and prompt behavior.
-7. [Privacy and data protection](privacy-and-data-protection.md): no-PII egress and provider controls.
-8. [Model strategy](model-strategy.md): candidate tiers, TCO and hybrid go/no-go rules.
-9. [Test and validation strategy](evaluation-plan.md): suites, metrics, experiments and release gates.
-10. [Requirements traceability](traceability-matrix.md): requirements mapped to controls and tests.
-11. [Implementation roadmap](implementation-roadmap.md): build order and definition of done.
+## Original `main` design pack (2026-10-31)
 
-## Supporting artifacts
+The documents below describe the initial provider-neutral plan: explicit Python
+orchestration, SQLite and curated policy retrieval, with a proposed local/paid comparison.
+They preserve reasoning and alternatives; their roadmap, implementation status and model
+comparisons do **not** describe a second completed or benchmarked implementation.
+ADR 005 scopes the platform's different choices. Common requirements remain useful, but
+follow the branch documents above for runtime behavior and the security policy for invariants.
 
-- [ADR-001](adr/001-hybrid-provider-neutral-architecture.md): provider-neutral tool-first cascade decision.
-- [ADR-002](adr/002-no-pii-external-egress.md): local privacy boundary decision.
-- [ADR-003](adr/003-sqlite-and-curated-policy-retrieval.md): data and retrieval decision.
-- [ADR-004](adr/004-explicit-orchestration.md): explicit state-machine orchestration decision.
-- [Seed cases](evals/cases.jsonl): initial executable-style acceptance cases.
-- [Case schema](evals/case.schema.json): contract for every evaluation case.
-- [Experiment matrix](evals/experiment-matrix.csv): variants to compare.
-- [Human review sheet](evals/human-review.csv): blinded review template.
-- [Repository security policy](../SECURITY.md): mandatory trust boundaries and privacy invariants.
+1. [Project context](project-context.md): problem, users and original requirements.
+2. [Solution architecture](architecture.md): original components, routing and boundaries.
+3. [Technology stack](technology-stack.md): original selections and non-selections.
+4. [Technical design](technical-design.md): original state-machine/module plan.
+5. [Data contracts](data-contracts.md): supplied data and original schema assumptions.
+6. [Context specification](context-spec.md): persona and source-precedence design.
+7. [Privacy and data protection](privacy-and-data-protection.md): original privacy design;
+   use SECURITY/ADR 002/005 for the explicit current policy/implementation distinction.
+8. [Model strategy](model-strategy.md): unexecuted candidate/TCO comparison plan.
+9. [Evaluation plan](evaluation-plan.md): original release-gate plan, distinct from G1.
+10. [Traceability matrix](traceability-matrix.md): original requirement/control mapping.
+11. [Implementation roadmap](implementation-roadmap.md): historical roadmap, not current status.
 
-## Status
+Supporting original artifacts:
 
-The documentation baseline is complete enough to start implementation, but the
-architecture is still **proposed until validated**. Model selection remains deliberately
-open until the same frozen corpus has run against all candidates. Model names and prices
-are a dated discovery snapshot (2026-10-31), never implicit runtime defaults.
+- [ADR 001](adr/001-hybrid-provider-neutral-architecture.md): proposed provider-neutral cascade.
+- [ADR 003](adr/003-sqlite-and-curated-policy-retrieval.md): SQLite and curated retrieval.
+- [ADR 004](adr/004-explicit-orchestration.md): explicit orchestration without an agent framework.
+- [Original seed cases](evals/cases.jsonl) and [schema](evals/case.schema.json).
+- [Experiment matrix](evals/experiment-matrix.csv) and [human review sheet](evals/human-review.csv).
 
-The only implementation already present is the isolated privacy boundary plus contract
-tests. Repositories, orchestration, provider adapters and CLI remain planned.
-
-## Open decisions before implementation
-
-- Confirm the supported Python version and lock exact dependencies.
-- Record available local inference hardware and shortlist models that fit it.
-- Confirm which paid-provider credentials are available for the baseline benchmark.
-- Approve the initial prompt/policy version and hidden evaluation split.
-- Define production retention, legal basis, provider DPA and regional-processing needs if
-  the prototype advances to real customer data.
-
-Validate this pack with:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-
+The earlier statement that only the isolated privacy boundary was implemented is obsolete
+for `test-rag`. Use the root README's pytest/evaluation commands to reproduce this branch;
+the original provider comparisons and production readiness remain unvalidated.

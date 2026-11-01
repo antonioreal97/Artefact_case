@@ -8,16 +8,17 @@ its normalized options through ``harden_provider_options``.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Iterable, Mapping
+from enum import StrEnum
+from typing import Any
 
 
-class DataClassification(str, Enum):
+class DataClassification(StrEnum):
     PUBLIC = "public"
     INTERNAL = "internal"
     RESTRICTED = "restricted"
-    SECRET = "secret"
+    SECRET = "secret"  # noqa: S105 -- classification label, not a credential
 
 
 class PrivacyBoundaryError(ValueError):
@@ -57,8 +58,9 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"(?<!\d)(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?9?\d{4}[-\s]?\d{4}(?!\d)"),
     ),
     (
+        # Seed/legacy BR...BR codes and the UPU S10 shape used by Correios (LX123456789BR).
         "tracking_code",
-        re.compile(r"(?i)\bBR[A-Z0-9]{9}BR\b"),
+        re.compile(r"(?i)\b(?:BR[A-Z0-9]{9}BR|[A-Z]{2}\d{9}[A-Z]{2})\b"),
     ),
     (
         "order_reference",
@@ -73,6 +75,28 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"(?i)\b(?:sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,})\b"),
     ),
 )
+
+# Formatted or bare CPF candidates; only runs with valid check digits count as CPF, so
+# product codes and other 11-digit numbers are not flagged.
+CPF_CANDIDATE = re.compile(r"(?<![\w.-])\d{3}([.\s]?)\d{3}\1\d{3}[\s.-]?\d{2}(?![\w-]|\.\d)")
+
+
+def is_valid_cpf(value: str) -> bool:
+    """True when ``value`` has 11 digits with valid CPF check digits."""
+    digits = [int(c) for c in value if c.isdigit()]
+    if len(digits) != 11 or len(set(digits)) == 1:
+        return False
+    for size in (9, 10):
+        total = sum(d * w for d, w in zip(digits[:size], range(size + 1, 1, -1), strict=True))
+        if (total * 10) % 11 % 10 != digits[size]:
+            return False
+    return True
+
+
+def cpf_spans(text: str) -> list[tuple[int, int]]:
+    """Spans of CPF numbers (formatted or bare) whose check digits are valid."""
+    return [m.span() for m in CPF_CANDIDATE.finditer(text) if is_valid_cpf(m.group())]
+
 
 _PROVIDER_PRIVACY_DEFAULTS: dict[str, dict[str, bool]] = {
     "openai": {
@@ -147,6 +171,8 @@ def find_restricted_data(
         for kind, pattern in _PATTERNS:
             if pattern.search(current):
                 findings.append(PrivacyFinding(kind, path))
+        if cpf_spans(current):
+            findings.append(PrivacyFinding("cpf", path))
 
         folded = current.casefold()
         if any(candidate in folded for candidate in known):
@@ -165,18 +191,12 @@ def assert_external_payload_safe(
     """Fail closed when a payload contains or is classified as restricted data."""
 
     if not external_processing_allowed(classification):
-        raise PrivacyBoundaryError(
-            f"External processing denied for {classification.value} data"
-        )
+        raise PrivacyBoundaryError(f"External processing denied for {classification.value} data")
 
-    findings = find_restricted_data(
-        payload, known_restricted_values=known_restricted_values
-    )
+    findings = find_restricted_data(payload, known_restricted_values=known_restricted_values)
     if findings:
         categories = ", ".join(sorted({finding.kind for finding in findings}))
-        raise PrivacyBoundaryError(
-            f"External payload blocked by privacy guard: {categories}"
-        )
+        raise PrivacyBoundaryError(f"External payload blocked by privacy guard: {categories}")
 
 
 def redact_for_log(
@@ -198,9 +218,7 @@ def redact_for_log(
             if str(key).casefold() in _SENSITIVE_KEYS and child not in (None, ""):
                 redacted[key] = "[REDACTED]"
             else:
-                redacted[key] = redact_for_log(
-                    child, known_restricted_values=known
-                )
+                redacted[key] = redact_for_log(child, known_restricted_values=known)
         return redacted
 
     if isinstance(value, list):
@@ -211,6 +229,8 @@ def redact_for_log(
         return value
 
     result = value
+    for start, end in reversed(cpf_spans(result)):
+        result = result[:start] + "[REDACTED_CPF]" + result[end:]
     for kind, pattern in _PATTERNS:
         result = pattern.sub(f"[REDACTED_{kind.upper()}]", result)
     for candidate in sorted(known, key=len, reverse=True):
@@ -246,4 +266,3 @@ def harden_provider_options(
         )
 
     return {**requested_options, **protected}
-

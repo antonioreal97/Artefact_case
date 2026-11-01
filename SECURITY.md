@@ -1,5 +1,15 @@
 # Security and Privacy Policy
 
+## Policy and implementation status (2026-11-01)
+
+This is the normative privacy policy. The `test-rag` experiment in
+[ADR 005](docs/adr/005-multi-tenant-platform-branch.md) implements a reversible,
+conversation-scoped token vault. That is **pseudonymization with scoped linkability,
+not anonymization**. It does not prove that arbitrary free text is safe for external
+processing. [Architecture finding A-3](docs/reviews/architecture-review.md) records the
+remaining gap between the policy and implementation; documenting it does not waive
+any no-raw-PII, authorization, logging or fail-closed requirement.
+
 ## System and Scope
 
 This policy covers the Emporio da Musica customer-support agent, including:
@@ -94,11 +104,30 @@ A verified customer has a shipped order and is asking for a concise status expla
 
 ### Pseudonymization
 
-Internal references must use random, short-lived tokens.
+The original policy requires random, short-lived internal tokens. The current
+`test-rag` implementation differs: `PrivacyVault` allocates sequential placeholders
+such as `[[ORDER_1]]` and `[[EMAIL_1]]`, reusing a token for the same value within a
+conversation. The lookup mapping is scoped by tenant and conversation in local Redis,
+with a sliding 24-hour TTL on save; tokens are not random or anonymous.
 
-Tokens must not be derived from names, emails, phones, order IDs or tracking codes. The token-to-record mapping remains inside the trusted local boundary and expires with the session.
+Tokens must not be derived from names, emails, phones, order IDs or tracking codes.
+The token-to-record mapping must remain inside the trusted local boundary and expire
+with the session. The branch implements sliding TTL expiry, not explicit deletion on
+conversation closure; this lifecycle gap remains part of A-13.
 
 Pseudonymized data is still treated as personal data when re-identification is possible.
+Repeated placeholders allow linkage within a conversation; matching token text in two
+conversations does not mean the underlying values match. Only trusted local code may
+resolve tokens, and final reveal is limited to current-turn values or an authorized
+order lookup in that turn.
+
+ADR 005 describes the implemented external use of those reversible placeholders. This
+is an explicit deviation from the original prohibition on external reversible pseudonyms
+(ADR 002 and the High findings below), not evidence of compliance with that prohibition.
+The branch choice does not authorize raw customer records, identifying context or the
+mapping to leave the trusted boundary. Resolving this deviation requires a stronger
+structured public/abstract input boundary or an explicit policy decision; this wording
+change does neither.
 
 ### Provider Controls
 
@@ -173,6 +202,12 @@ Secrets must never appear in prompts, traces, model responses, evaluation fixtur
 ## Fail-Closed Behavior
 
 If classification or redaction is uncertain, the external provider call must not occur.
+Ambiguous restricted turns must fail closed to local processing or human handoff.
+Detection currently uses rules and known tenant values, not a general entity recognizer:
+residual identity/address cues are blocked, but previously unknown lower-case names without
+those cues and contextual identifying combinations can escape detection. Therefore the
+implementation cannot guarantee that every ambiguous restricted turn is recognized; a
+passed scan is not proof of anonymization or of absence of personal data (A-3 / O-9).
 
 If the privacy guard fails, the agent must return a safe handoff response without exposing internal details.
 
@@ -203,7 +238,12 @@ Provider failure must never cause automatic rerouting of restricted content to a
 
 ## Known Limitations
 
-The current project is a prototype and does not yet implement production authentication, consent management, data-subject request workflows, deletion orchestration or a formal data-protection impact assessment.
+The current project is a prototype. Tenant API-key authentication exists, but direct API
+chat lacks end-user/session binding; tenant credentials must be held by a trusted server.
+Consent management, data-subject request workflows, complete deletion orchestration and
+a formal data-protection impact assessment remain unimplemented. Retention jobs exist,
+but conversation activity timestamps and current/failed document lifetimes are incomplete
+(A-11 / A-13). See the [current development status](docs/development-process.md#42-state-at-integration-2026-11-01).
 
 These limitations do not weaken the no-PII-egress and identity-verification invariants.
 

@@ -21,6 +21,27 @@ representation that passes a fail-closed scan immediately before network seriali
 Provider ZDR, no-training terms, disabled logging and `store=false` are required defense in
 depth where applicable, but they never create an exception to the no-PII rule.
 
+## Branch implementation clarification (2026-11-01)
+
+The no-raw-PII-egress requirement remains normative for both designs. The original decision
+rejects externally transmitted reversible pseudonyms (below). The `test-rag` implementation
+in [ADR 005](005-multi-tenant-platform-branch.md) nevertheless sends sequential, reversible
+conversation placeholders through the guarded model. This is a documented branch deviation,
+not anonymization and not a silent relaxation of [SECURITY.md](../../SECURITY.md).
+
+The local tenant/conversation vault provides pseudonymization with scoped linkability:
+repeated values reuse a token within a conversation; mappings stay local with a sliding
+24-hour TTL. Identity verification and authorized final reveal remain local. Neither
+raw values nor mappings may be sent externally or logged. The original random-token and
+no-reversible-egress rules are not fully implemented by this branch.
+
+Discovery uses rules and known tenant values; unknown lower-case names without identifying
+cues and contextual identifiers can be missed. Ambiguous restricted turns must fail closed;
+the implementation blocks recognized residual cues, but a passing scan cannot establish
+that all ambiguous text was detected. [A-3](../reviews/architecture-review.md) and O-9 in
+[the development log](../development-process.md) remain open. Prefer allowlisted structured
+public/abstract inputs before claiming the universal policy is enforced.
+
 ## Consequences
 
 ### Positive

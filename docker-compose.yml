@@ -1,0 +1,128 @@
+# Owner of app/worker/migrate services: Task B. db/redis defined by the orchestrator.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: emporio
+      POSTGRES_PASSWORD: emporio  # local dev only
+      POSTGRES_DB: emporio
+    ports:
+      - "127.0.0.1:${DB_PORT:-5434}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emporio -d emporio"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: .
+    image: emporio-platform:local
+    env_file: .env
+    environment: &app-environment
+      DATABASE_URL: postgresql+asyncpg://emporio:emporio@db:5432/emporio
+      REDIS_URL: redis://redis:6379/0
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  seed:
+    image: emporio-platform:local
+    build: .
+    profiles: ["seed"]
+    env_file: .env
+    environment: *app-environment
+    # Provision SEED_API_KEY (admin) and optionally SEED_CHAT_API_KEY (chat-only widget key)
+    # in .env; neither is echoed into container logs.
+    command: ["python", "-m", "scripts.seed", "--api-key-from-env", "SEED_API_KEY"]
+    # Customer data is never baked into the image (M-7): mounted read-only into seed/test only.
+    volumes:
+      - type: bind
+        source: "./Desafio Técnico AI Engineer 2026/data"
+        target: "/app/Desafio Técnico AI Engineer 2026/data"
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: emporio-platform:local
+    build: .
+    env_file: .env
+    environment: *app-environment
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    image: emporio-platform:local
+    build: .
+    env_file: .env
+    environment: *app-environment
+    command: ["arq", "app.services.ingestion_jobs.WorkerSettings"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  test:
+    image: emporio-platform:test
+    build:
+      context: .
+      target: test
+    profiles: ["test"]
+    environment:
+      <<: *app-environment
+      APP_ENV: dev
+      LLM_PROVIDER: fake
+      EMBEDDING_PROVIDER: hash
+      INGESTION_MODE: inline
+      API_KEY_PEPPER: dev-only-pepper-change-me
+      USER_REF_KEY: dev-only-user-ref-key-change-me
+      OPENAI_TRACING_ENABLED: "false"
+      RUN_OPENAI_LIVE_TESTS: "0"
+      TEST_DATABASE_ADMIN_URL: postgresql+asyncpg://emporio:emporio@db:5432/postgres
+      TEST_REDIS_URL: redis://redis:6379/15
+    command: ["pytest", "-q"]
+    # The local emporio role can CREATE DATABASE; fixtures use throw-away databases.
+    volumes:
+      - type: bind
+        source: "./Desafio Técnico AI Engineer 2026/data"
+        target: "/app/Desafio Técnico AI Engineer 2026/data"
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
