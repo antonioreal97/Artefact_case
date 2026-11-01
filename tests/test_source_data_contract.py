@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = next(ROOT.glob("Desafio Te*AI Engineer 2026")) / "data"
+DATA_DIR = next(ROOT.glob("Desafio T*AI Engineer 2026")) / "data"
 
 
 def read_csv(suffix):
