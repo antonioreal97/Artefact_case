@@ -1,0 +1,218 @@
+"""Deterministic NON-PRODUCTION model for offline demos and integration tests.
+
+This is a small scripted tool router, not an LLM and not a general language interpreter.
+It renders only successful tool outputs, never treats documents as executable commands,
+and deliberately refuses suspicious document passages. Production creation is forbidden
+by Settings and build_model_provider. No network calls are made here.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+import re
+from collections.abc import AsyncIterator
+from decimal import Decimal
+
+from agents import ModelSettings
+from agents.agent_output import AgentOutputSchemaBase
+from agents.handoffs import Handoff
+from agents.items import (
+    ModelResponse,
+    TResponseInputItem,
+    TResponseOutputItem,
+    TResponseStreamEvent,
+)
+from agents.models.interface import ModelTracing
+from agents.testing import ScriptedModel, assistant_message, function_call
+from agents.tool import Tool
+from openai.types.responses.response_prompt_param import ResponsePromptParam
+
+from app.agents.guardrails import NO_INFORMATION, check_input
+
+
+def _currency(value: object) -> str:
+    return f"{Decimal(str(value)):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+class FakeCommerceModel(ScriptedModel):
+    """Uses the SDK's inspected scripted-model implementation, including streaming."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._sequence = 0
+
+    def _call(self, name: str, arguments: dict[str, object]) -> list[TResponseOutputItem]:
+        self._sequence += 1
+        return [function_call(name, arguments, call_id=f"offline-call-{self._sequence}")]
+
+    def _step(self, input: str | list[TResponseInputItem]) -> list[TResponseOutputItem]:
+        items = [{"role": "user", "content": input}] if isinstance(input, str) else list(input)
+        last_user = max(
+            (i for i, item in enumerate(items) if item.get("role") == "user"), default=-1
+        )
+        text = str(items[last_user].get("content", "")) if last_user >= 0 else ""
+        turn = items[last_user + 1 :]
+        calls = {
+            str(item.get("call_id")): str(item.get("name"))
+            for item in turn
+            if item.get("type") == "function_call"
+        }
+        outputs: list[tuple[str, dict[str, object]]] = []
+        for item in turn:
+            if item.get("type") == "function_call_output":
+                try:
+                    parsed = json.loads(str(item.get("output", "")))
+                except ValueError:
+                    continue
+                if isinstance(parsed, dict):
+                    outputs.append((calls.get(str(item.get("call_id")), ""), parsed))
+        if not outputs:
+            order = re.search(r"\[\[ORDER_\d+\]\]", text)
+            contact = re.search(r"\[\[(?:EMAIL|PHONE)_\d+\]\]", text)
+            if order and contact:
+                return self._call(
+                    "lookup_order",
+                    {
+                        "order_token": order.group(),
+                        "contact_token": contact.group(),
+                    },
+                )
+            decision = check_input(text)
+            if decision.reason:
+                return self._call(
+                    "request_human_handoff",
+                    {
+                        "reason": decision.reason,
+                        "summary": "Solicitação de atendimento humano.",
+                    },
+                )
+            if re.search(
+                r"pre[cç]o|valor|custa|estoque|dispon[ií]vel|produto|viol[aã]o|guitarra|piano|teclado",
+                text,
+                re.IGNORECASE,
+            ):
+                query = re.sub(
+                    r"\b(?:qual|quanto|o|a|os|as|um|uma|do|da|de|tem|voc[eê]s|"
+                    r"pre[cç]o|valor|custa|estoque|dispon[ií]vel|produto|por|favor|em|[eé])\b",
+                    " ",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+                query = re.sub(r"[^\w\s-]", " ", query).strip()
+                return self._call("search_products", {"query": " ".join(query.split())})
+            return self._call("search_knowledge", {"query": text, "category": None})
+        if re.search(r"estoque|dispon[ií]vel", text, re.IGNORECASE):
+            for name, envelope in outputs:
+                data = envelope.get("data")
+                if isinstance(data, dict):
+                    data = data.get("items")
+                if name == "search_products" and envelope.get("ok") and isinstance(data, list):
+                    if (
+                        data
+                        and isinstance(data[0], dict)
+                        and not any(n == "check_stock" for n, _ in outputs)
+                    ):
+                        return self._call("check_stock", {"product_id": data[0]["product_id"]})
+        parts: list[str] = []
+        for name, envelope in outputs:
+            if not envelope.get("ok"):
+                continue
+            data = envelope.get("data")
+            if name == "search_knowledge" and isinstance(data, dict) and data.get("sufficient"):
+                sources = data.get("sources", [])
+                if isinstance(sources, list):
+                    for source in sources:
+                        if not isinstance(source, dict):
+                            continue
+                        content = html.unescape(
+                            re.sub(r"</?untrusted_document[^>]*>", "", str(source["content"]))
+                        )
+                        # Refuse malicious passages; never execute/echo injected instructions.
+                        if not check_input(content).refusal:
+                            parts.append(f"{content.strip()} [{source['label']}]")
+            elif name in {"search_products", "get_product_details", "get_price"}:
+                if isinstance(data, dict) and "items" in data:
+                    data = data["items"]
+                products = data if isinstance(data, list) else [data]
+                for product in products:
+                    if isinstance(product, dict) and "price" in product:
+                        parts.append(
+                            f"{product.get('name', 'Produto')}: R$ {_currency(product['price'])}."
+                        )
+            elif name == "check_stock" and isinstance(data, dict):
+                parts.append(
+                    f"{data.get('name', 'Produto')}: "
+                    + ("disponível em estoque." if data.get("available") else "indisponível.")
+                )
+            elif (
+                name == "lookup_order" and isinstance(data, dict) and data.get("identity_verified")
+            ):
+                parts.append(
+                    f"Situação: {data.get('order_status', data.get('status', 'confirmada'))}."
+                )
+                for value in data.values():
+                    if isinstance(value, str) and re.fullmatch(
+                        r"\[\[(?:TRACKING|DATE)_\d+\]\]", value
+                    ):
+                        parts.append(value)
+            elif name == "request_human_handoff":
+                parts.append("Solicitei atendimento humano para ajudar com sua dúvida.")
+        return [assistant_message("\n".join(parts) if parts else NO_INFORMATION)]
+
+    async def get_response(
+        self,
+        system_instructions: str | None,
+        input: str | list[TResponseInputItem],
+        model_settings: ModelSettings,
+        tools: list[Tool],
+        output_schema: AgentOutputSchemaBase | None,
+        handoffs: list[Handoff],
+        tracing: ModelTracing,
+        *,
+        previous_response_id: str | None,
+        conversation_id: str | None,
+        prompt: ResponsePromptParam | None,
+    ) -> ModelResponse:
+        self.enqueue(self._step(input))
+        return await super().get_response(
+            system_instructions,
+            input,
+            model_settings,
+            tools,
+            output_schema,
+            handoffs,
+            tracing,
+            previous_response_id=previous_response_id,
+            conversation_id=conversation_id,
+            prompt=prompt,
+        )
+
+    async def stream_response(
+        self,
+        system_instructions: str | None,
+        input: str | list[TResponseInputItem],
+        model_settings: ModelSettings,
+        tools: list[Tool],
+        output_schema: AgentOutputSchemaBase | None,
+        handoffs: list[Handoff],
+        tracing: ModelTracing,
+        *,
+        previous_response_id: str | None,
+        conversation_id: str | None,
+        prompt: ResponsePromptParam | None,
+    ) -> AsyncIterator[TResponseStreamEvent]:
+        self.enqueue(self._step(input))
+        async for event in super().stream_response(
+            system_instructions,
+            input,
+            model_settings,
+            tools,
+            output_schema,
+            handoffs,
+            tracing,
+            previous_response_id=previous_response_id,
+            conversation_id=conversation_id,
+            prompt=prompt,
+        ):
+            yield event
