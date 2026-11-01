@@ -26,5 +26,61 @@ services:
       timeout: 3s
       retries: 20
 
+  migrate:
+    build: .
+    image: emporio-platform:local
+    env_file: .env
+    environment: &app-environment
+      DATABASE_URL: postgresql+asyncpg://emporio:emporio@db:5432/emporio
+      REDIS_URL: redis://redis:6379/0
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  seed:
+    image: emporio-platform:local
+    build: .
+    profiles: ["seed"]
+    env_file: .env
+    environment: *app-environment
+    # Provision SEED_API_KEY in .env; it is never echoed into container logs.
+    command: ["python", "-m", "scripts.seed", "--api-key-from-env", "SEED_API_KEY"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: emporio-platform:local
+    build: .
+    env_file: .env
+    environment: *app-environment
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    image: emporio-platform:local
+    build: .
+    env_file: .env
+    environment: *app-environment
+    command: ["arq", "app.services.ingestion_jobs.WorkerSettings"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
