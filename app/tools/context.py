@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.integrations.base import CommerceBackend
 from app.rag.types import EmbeddingProvider, RetrievedChunk
+from app.services.attempt_limiter import AttemptLimiter, InMemoryAttemptLimiter
 from app.services.privacy_vault import PrivacyVault
 
 
@@ -35,6 +36,10 @@ class ToolContext:
     commerce: CommerceBackend
     embedder: EmbeddingProvider
     vault: PrivacyVault
+    # Cross-conversation failure counters (order-lookup lockout). Runtime: Redis-backed.
+    limiter: AttemptLimiter = field(default_factory=InMemoryAttemptLimiter)
+    # Opaque end-user/actor reference for per-actor limits (hashed; never raw PII).
+    actor_ref: str | None = None
     # Filled during the turn; persisted by the chat service afterwards.
     retrieved_chunks: list[RetrievedChunk] = field(default_factory=list)
     tool_calls: list[ToolCallRecord] = field(default_factory=list)

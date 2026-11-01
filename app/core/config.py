@@ -13,7 +13,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_env: Literal["dev", "test", "prod"] = "dev"
+    # Fail closed: an unset APP_ENV means prod (forbids fakes and the default pepper).
+    app_env: Literal["dev", "test", "prod"] = "prod"
     log_level: str = "INFO"
 
     # --- persistence -------------------------------------------------------------------
@@ -23,6 +24,9 @@ class Settings(BaseSettings):
     # --- auth --------------------------------------------------------------------------
     # Pepper mixed into API-key hashes. Must be overridden outside dev/test.
     api_key_pepper: SecretStr = SecretStr("dev-only-pepper-change-me")
+    # Separate HMAC key for channel user references (e.g. WhatsApp wa_id -> opaque ref).
+    user_ref_key: SecretStr = SecretStr("dev-only-user-ref-key-change-me")
+    expose_api_docs: bool = True  # forced off in prod by the validator below
 
     # --- model providers ---------------------------------------------------------------
     # "fake" providers are deterministic and allowed only when app_env != "prod".
@@ -51,6 +55,19 @@ class Settings(BaseSettings):
 
     # --- tools / integrations ------------------------------------------------------------
     tool_timeout_seconds: float = 5.0
+    db_statement_timeout_ms: int = 5000
+
+    # --- abuse protection / retention ------------------------------------------------
+    # Failed order verifications per (tenant, order) and per (tenant, actor) in the window.
+    order_lookup_max_failures: int = 3
+    order_lookup_lockout_seconds: int = 3600
+    # Requests per minute per API key on /v1/chat/messages and per channel user.
+    chat_rate_limit_per_minute: int = 30
+    # Failed authentications per minute per client IP before 429.
+    auth_failure_limit_per_minute: int = 20
+    # Raw conversation text, tool executions, audit events and handoffs older than this are
+    # purged by the retention job (SECURITY.md: bounded retention).
+    retention_days: int = 90
     whatsapp_verify_token: SecretStr | None = None
     whatsapp_app_secret: SecretStr | None = None
     whatsapp_access_token: SecretStr | None = None
@@ -63,6 +80,9 @@ class Settings(BaseSettings):
                 raise ValueError("Deterministic fake providers are not allowed in prod")
             if self.api_key_pepper.get_secret_value() == "dev-only-pepper-change-me":
                 raise ValueError("API_KEY_PEPPER must be set in prod")
+            if self.user_ref_key.get_secret_value() == "dev-only-user-ref-key-change-me":
+                raise ValueError("USER_REF_KEY must be set in prod")
+            self.expose_api_docs = False
         if self.chunk_overlap_tokens >= self.chunk_size_tokens:
             raise ValueError("chunk_overlap_tokens must be smaller than chunk_size_tokens")
         return self
