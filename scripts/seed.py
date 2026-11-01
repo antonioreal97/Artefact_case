@@ -1,6 +1,7 @@
 """Seed commerce and ingest policy knowledge: uv run python -m scripts.seed.
 
-Use --api-key-from-env SEED_API_KEY for a known local development credential.
+Use --api-key-from-env SEED_API_KEY for a known local development credential (admin key,
+all scopes). If SEED_CHAT_API_KEY is set, a chat-only ``widget`` key is provisioned too.
 The six CSVs are validated together before writes. Only aggregate counts are output.
 """
 
@@ -23,7 +24,12 @@ from app.models import Document, DocumentVersion
 from app.rag.embeddings import get_embedding_provider
 from app.rag.ingestion import create_document_version, process_document_version
 from scripts.commerce import DATA_DIR, import_commerce, load_commerce
-from scripts.create_tenant import api_key_from_env, create_tenant
+from scripts.create_tenant import (
+    CHAT_KEY_ENV,
+    api_key_from_env,
+    create_tenant,
+    optional_api_key_from_env,
+)
 
 
 async def ingest_policy(
@@ -68,13 +74,17 @@ async def seed(
     data_dir: Path = DATA_DIR,
     api_key: str | None = None,
     whatsapp_phone_number_id: str | None = None,
+    chat_api_key: str | None = None,
 ) -> tuple[uuid.UUID, str | None, dict[str, int]]:
     # File IO runs off the event loop and every CSV is validated before any write.
     exports = await asyncio.to_thread(load_commerce, data_dir)
     policy = data_dir / "políticas_da_loja.pdf"
     data = await asyncio.to_thread(policy.read_bytes)
     tenant_id, plaintext = await create_tenant(
-        session, api_key=api_key, whatsapp_phone_number_id=whatsapp_phone_number_id
+        session,
+        api_key=api_key,
+        whatsapp_phone_number_id=whatsapp_phone_number_id,
+        chat_api_key=chat_api_key,
     )
     counts = await import_commerce(session, tenant_id=tenant_id, exports=exports)
     await session.commit()
@@ -87,6 +97,7 @@ async def seed(
 
 async def run(data_dir: Path, api_key_variable: str | None) -> None:
     key = api_key_from_env(api_key_variable)
+    chat_key = optional_api_key_from_env(CHAT_KEY_ENV)
     try:
         async with get_sessionmaker()() as session:
             _, _, counts = await seed(
@@ -94,6 +105,7 @@ async def run(data_dir: Path, api_key_variable: str | None) -> None:
                 data_dir=data_dir,
                 api_key=key,
                 whatsapp_phone_number_id=os.environ.get("WHATSAPP_PHONE_NUMBER_ID"),
+                chat_api_key=chat_key,
             )
         print("Seed complete: " + ", ".join(f"{name}={n}" for name, n in counts.items()))
     finally:

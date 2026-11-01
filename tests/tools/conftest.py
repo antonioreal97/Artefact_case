@@ -21,6 +21,7 @@ from app.models import (
     CommercePromotion,
     Conversation,
 )
+from app.services.attempt_limiter import AttemptLimiter, InMemoryAttemptLimiter
 from app.services.privacy_vault import PrivacyVault
 from app.tools.context import ToolContext
 
@@ -237,6 +238,9 @@ def make_ctx(
     tenant_id: uuid.UUID,
     conversation_id: uuid.UUID,
     commerce: CommerceBackend | None = None,
+    *,
+    limiter: AttemptLimiter | None = None,
+    actor_ref: str | None = None,
 ) -> ToolContext:
     return ToolContext(
         tenant_id=tenant_id,
@@ -246,6 +250,8 @@ def make_ctx(
         commerce=commerce or LocalCommerceBackend(session_factory, tenant_id),
         embedder=_Embedder(),
         vault=PrivacyVault(),
+        limiter=limiter or InMemoryAttemptLimiter(),
+        actor_ref=actor_ref,
     )
 
 

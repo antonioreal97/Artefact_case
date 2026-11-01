@@ -2,7 +2,8 @@
 ``app.schemas.chat`` and ``IngestionReceipt`` in ``app.rag.types``; not duplicated here).
 
 Request models ignore unknown fields: a ``tenant_id`` sent by a client is silently dropped -
-the tenant comes only from the API key."""
+the tenant comes only from the API key. Text fields containing a NUL character (``\x00``)
+are rejected with 422: PostgreSQL ``text`` cannot store it (adversarial FINDING-6)."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.handoff import HANDOFF_REASONS
 
@@ -28,8 +29,18 @@ assert set(get_args(HandoffReason)) == set(HANDOFF_REASONS)  # keep in sync with
 HandoffStatus = Literal["open", "in_progress", "resolved"]
 
 
+NUL_MESSAGE = "NUL characters are not allowed"
+
+
 class _Request(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _reject_nul(cls, value: object) -> object:
+        if isinstance(value, str) and "\x00" in value:
+            raise ValueError(NUL_MESSAGE)
+        return value
 
 
 class ErrorResponse(BaseModel):

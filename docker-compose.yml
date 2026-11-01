@@ -45,8 +45,15 @@ services:
     profiles: ["seed"]
     env_file: .env
     environment: *app-environment
-    # Provision SEED_API_KEY in .env; it is never echoed into container logs.
+    # Provision SEED_API_KEY (admin) and optionally SEED_CHAT_API_KEY (chat-only widget key)
+    # in .env; neither is echoed into container logs.
     command: ["python", "-m", "scripts.seed", "--api-key-from-env", "SEED_API_KEY"]
+    # Customer data is never baked into the image (M-7): mounted read-only, seed only.
+    volumes:
+      - type: bind
+        source: "./Desafio Técnico AI Engineer 2026/data"
+        target: "/app/Desafio Técnico AI Engineer 2026/data"
+        read_only: true
     depends_on:
       migrate:
         condition: service_completed_successfully

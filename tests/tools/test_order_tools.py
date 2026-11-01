@@ -6,9 +6,9 @@ import json
 import pytest
 
 from app.tools.orders import (
-    FAILS_COUNTER_KEY,
-    MAX_FAILED_VERIFICATIONS,
+    MSG_LOCKED,
     OrderStatusView,
+    actor_failure_key,
     lookup_order,
 )
 from emporio_agent.privacy import (
@@ -80,7 +80,13 @@ async def test_lookup_without_tracking(ctx_a):
 @integration
 @pytest.mark.parametrize(
     "phone",
-    ["(67) 99812-3456", "+55 67 99812-3456", "5567998123456", "99812-3456", "067 99812 3456"],
+    [
+        "(67) 99812-3456",
+        "+55 67 99812-3456",
+        "5567998123456",
+        "067 99812 3456",
+        "(67) 9812-3456",  # legacy 8-digit mobile form, same area code
+    ],
 )
 async def test_phone_variants_verify(ctx_a, phone):
     res = await lookup_order(
@@ -90,7 +96,19 @@ async def test_phone_variants_verify(ctx_a, phone):
 
 
 @integration
-@pytest.mark.parametrize("phone", ["(11) 99812-3456", "(67) 99812-0000", "1234"])
+@pytest.mark.parametrize(
+    "phone",
+    [
+        "(11) 99812-3456",
+        "(67) 99812-0000",
+        "1234",
+        # Review L-3: subscriber digits without the area code are no longer accepted.
+        "99812-3456",
+        "9812-3456",
+        "+55 9 9812 3456",
+        "(67) 8812-3456",  # 8-digit form only matches when the 9-digit number starts with 9
+    ],
+)
 async def test_phone_mismatch_fails(ctx_a, phone):
     res = await lookup_order(
         ctx_a, ctx_a.vault.tokenize("ORDER", "101"), ctx_a.vault.tokenize("PHONE", phone)
@@ -118,18 +136,18 @@ async def test_no_enumeration_mismatch_equals_missing_order(ctx_a):
 @integration
 async def test_brute_force_lock_after_three_failures(ctx_a):
     order = ctx_a.vault.tokenize("ORDER", "101")
-    for i in range(MAX_FAILED_VERIFICATIONS):
+    for i in range(3):
         bad = ctx_a.vault.tokenize("EMAIL", f"guess{i}@x.com")
         res = await lookup_order(ctx_a, order, bad)
         assert res.error.code == "not_authorized"
-    assert ctx_a.vault.counters[FAILS_COUNTER_KEY] == MAX_FAILED_VERIFICATIONS
+    assert await ctx_a.limiter.failures(actor_failure_key(ctx_a)) == 3
     # Correct contact is refused now; message suggests a human handoff.
     locked = await lookup_order(ctx_a, order, ctx_a.vault.tokenize("EMAIL", A_EMAIL))
     assert not locked.ok and locked.error.code == "not_authorized"
-    assert "atendente" in locked.error.message
-    # Counter survives vault persistence (same conversation, next turn).
-    restored = type(ctx_a.vault).from_state(ctx_a.vault.to_state())
-    assert restored.counters[FAILS_COUNTER_KEY] == MAX_FAILED_VERIFICATIONS
+    assert locked.error.message == MSG_LOCKED and "atendente" in locked.error.message
+    assert ctx_a.tool_calls[-1].result_summary["locked"] is True
+    assert ctx_a.tool_calls[-2].result_summary["locked"] is True  # 3rd failure hit the limit
+    assert ctx_a.tool_calls[0].result_summary["locked"] is False
 
 
 @integration
@@ -145,7 +163,7 @@ async def test_invalid_tokens(ctx_a):
     for order_token, contact_token in cases:
         res = await lookup_order(ctx_a, order_token, contact_token)
         assert not res.ok and res.error.code == "invalid_input", (order_token, contact_token)
-    assert ctx_a.vault.counters.get(FAILS_COUNTER_KEY, 0) == 0  # not identity failures
+    assert await ctx_a.limiter.failures(actor_failure_key(ctx_a)) == 0  # not identity failures
     assert ctx_a.tool_calls[0].arguments_redacted["order_token"] == "[NOT_A_TOKEN]"
 
 
@@ -183,6 +201,7 @@ async def test_tool_call_records_contain_no_pii(ctx_a):
     assert records[1]["result_summary"] == {
         "error_code": "not_authorized",
         "failed_verifications": 1,
+        "locked": False,
     }
     assert find_restricted_data(records) == ()
     assert_no_raw(records)

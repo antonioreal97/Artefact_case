@@ -2,9 +2,22 @@
 
 PII is irreversibly replaced with redact_for_log-style [REDACTED_*] markers
 before chunking, storage and embedding (scanning before splitting prevents boundary
-bypasses). Public merchant contacts are preserved in stored chunks but replaced
-with [PUBLIC_CONTACT] for embedding, whose final egress guard has no allowlist.
-Only error categories are logged: parser/provider exceptions can contain raw PII.
+bypasses). Public merchant contacts are preserved in stored chunks (with their original
+formatting) but replaced with [PUBLIC_CONTACT] for embedding, whose final egress guard has
+no allowlist. Only error categories are logged: parser/provider exceptions can contain raw
+PII.
+
+Redaction must not destroy policy text (review M-6): contextual labels redact only a value
+that looks personal (a capitalized full name after ``nome|cliente|destinatário:``, a street
+address with a number, a CPF), never ``entrega:`` and never the rest of the line. Known
+tenant values (customer names/e-mails/phones, tracking codes, long order notes) are matched
+with word boundaries; numeric order ids and short notes are not used (they are not PII
+inside a policy and would erase prices or section numbers).
+
+PDF/DOCX parsing is CPU-bound and runs in a worker thread (review M-9). A version stuck in
+``processing`` longer than ``STALE_PROCESSING_AFTER`` (e.g. its worker died) may be
+reprocessed (review L-12): ``processed_at`` is stamped when processing starts and again
+when it ends, so it always holds the time of the last status change.
 """
 
 from __future__ import annotations
@@ -15,6 +28,8 @@ import logging
 import math
 import re
 import uuid
+from collections.abc import Iterable
+from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,9 +54,84 @@ INJECTION = re.compile(
     r"ignore\s+(?:all\s+)?(?:previous|prior)\s+instructions|system\s+prompt|voc[eê]\s+agora\s+[eé]|ignore\s+(?:as\s+)?instru[çc][õo]es|<\|(?:system|im_start)\|>|\[INST\]",
     re.IGNORECASE,
 )
-CONTEXTUAL_PII = re.compile(
-    r"(?im)\b(?:nome(?:\s+do\s+cliente)?|cliente|endere[çc]o|destinat[aá]rio|cpf|entrega(?:\s+prevista)?)\s*:\s*[^\n]+|\b(?:rua|avenida|av\.)\s+[^\n,]+,?\s+\d+[^\n]*"
+_CAP_WORD = r"[A-ZÀ-Ý][a-zà-ÿ]+"
+_NAME = rf"{_CAP_WORD}(?:[ \t]+(?:(?:d[aeo]s?|e)[ \t]+)?{_CAP_WORD})+"  # one line only
+_STREET = r"(?i:rua|r\.|avenida|av\.|alameda|al\.|travessa|tv\.|rodovia|estrada|pra[çc]a)"
+_ADDRESS = (
+    rf"\b{_STREET}\s+[^\n,;:]{{1,60}}?,?\s*(?:(?i:n[º°o.]?)\s*)?\d{{1,5}}\b"
+    r"(?:\s*[,-]\s*(?i:apto|apartamento|ap\.|bloco|bl\.|casa|sala|conj\.?)\s*[\w-]{1,8})*"
 )
+_CPF = (
+    r"(?<!\d)\d{3}\.\d{3}\.\d{3}-\d{2}(?!\d)"
+    r"|(?i:\bcpf\b)[^\d\n]{0,12}\d{3}[.\s]?\d{3}[.\s]?\d{3}[-\s]?\d{2}(?!\d)"
+)
+# Personal-looking values only; the label (if any) is kept, the rest of the line is kept.
+CONTEXTUAL_PII = re.compile(
+    rf"(?P<label>\b(?i:nome(?:\s+do\s+cliente)?|cliente|destinat[aá]rio)\s*:\s*)(?P<name>{_NAME})"
+    rf"|(?P<address>{_ADDRESS})"
+    rf"|(?P<cpf>{_CPF})"
+)
+PERSONAL_DATA_MARKER = "[REDACTED_PERSONAL_DATA]"
+KNOWN_VALUE_MARKER = "[REDACTED_KNOWN_VALUE]"
+_PUBLIC_MARKER_PREFIX = "PUBLICCONTACTTOKEN"
+MIN_NOTE_CHARS = 12
+STALE_PROCESSING_AFTER = timedelta(minutes=15)
+
+
+def _contextual_sub(match: re.Match[str]) -> str:
+    if match.group("name"):
+        return match.group("label") + PERSONAL_DATA_MARKER
+    return PERSONAL_DATA_MARKER
+
+
+def _known_pattern(known: Iterable[str]) -> re.Pattern[str] | None:
+    """Case-insensitive, word-bounded alternation of known values (longest first)."""
+    values = sorted({v.strip() for v in known if v and len(v.strip()) >= 3}, key=len, reverse=True)
+    if not values:
+        return None
+    return re.compile(
+        r"(?<!\w)(?:" + "|".join(re.escape(v) for v in values) + r")(?!\w)", re.IGNORECASE
+    )
+
+
+def _letters(index: int) -> str:
+    out = ""
+    while True:
+        index, rest = divmod(index, 26)
+        out = chr(65 + rest) + out
+        if index == 0:
+            return out
+        index -= 1
+
+
+def known_privacy_values(
+    customers: Iterable[tuple[str, str, str]], orders: Iterable[tuple[str | None, str | None]]
+) -> list[str]:
+    """Known restricted values: customer (name, email, phone) and order (tracking, notes).
+    Numeric order ids are deliberately excluded; notes only when long enough to be specific."""
+    known: list[str] = []
+    for name, email, phone in customers:
+        known.extend([name, email, phone])
+    for tracking_code, notes in orders:
+        if tracking_code:
+            known.append(tracking_code)
+        if notes and len(notes.strip()) >= MIN_NOTE_CHARS:
+            known.append(notes)
+    return known
+
+
+def is_stale_processing(version: DocumentVersion, now: datetime | None = None) -> bool:
+    """True when a ``processing`` version has not changed state for STALE_PROCESSING_AFTER."""
+    if version.ingestion_status != "processing":
+        return False
+    last_change = version.processed_at or version.created_at
+    if last_change is None:
+        return True
+    return (now or utcnow()) - last_change > STALE_PROCESSING_AFTER
+
+
+def _strip_nul(value: str | None) -> str | None:
+    return value.replace("\x00", "") if value is not None else None
 
 
 def _receipt(version: DocumentVersion, *, duplicate: bool) -> IngestionReceipt:
@@ -79,8 +169,12 @@ async def create_document_version(
     source_url: str | None = None,
     document_id: uuid.UUID | None = None,
 ) -> IngestionReceipt:
+    # Defensive: PostgreSQL text cannot store NUL (the API already rejects it with 422).
+    title = _strip_nul(title) or ""
+    filename, category, source_url = (_strip_nul(v) for v in (filename, category, source_url))
     # Full validation precedes persistence, including decoded-size/encryption checks.
-    extract_document(data, filename=filename, source_type=source_type)
+    # CPU-bound parsing runs off the event loop.
+    await asyncio.to_thread(extract_document, data, filename=filename, source_type=source_type)
     if document_id is None:
         document = Document(
             tenant_id=tenant_id,
@@ -143,43 +237,57 @@ async def _privacy_values(
 ) -> tuple[list[str], list[str]]:
     config = await session.scalar(select(AgentSettings).where(AgentSettings.tenant_id == tenant_id))
     public = list(config.public_contact_values) if config else []
-    known: list[str] = []
-    customers = await session.scalars(
-        select(CommerceCustomer).where(CommerceCustomer.tenant_id == tenant_id)
+    customers = await session.execute(
+        select(CommerceCustomer.name, CommerceCustomer.email, CommerceCustomer.phone).where(
+            CommerceCustomer.tenant_id == tenant_id
+        )
     )
-    for customer in customers:
-        known.extend([customer.name, customer.email, customer.phone])
-    orders = await session.scalars(
-        select(CommerceOrder).where(CommerceOrder.tenant_id == tenant_id)
+    orders = await session.execute(
+        select(CommerceOrder.tracking_code, CommerceOrder.notes).where(
+            CommerceOrder.tenant_id == tenant_id
+        )
     )
-    for order in orders:
-        known.extend([str(order.external_id), order.tracking_code or "", order.notes or ""])
-    return known, public
+    return (
+        known_privacy_values(
+            [(name, email, phone) for name, email, phone in customers],
+            [(tracking, notes) for tracking, notes in orders],
+        ),
+        public,
+    )
 
 
 def redact_document_text(
     text: str, known: list[str], public: list[str], *, for_embedding: bool = False
 ) -> str:
-    # Protect exact, administrator-approved public values, without logging them.
-    replacements: dict[str, str] = {}
-    for index, value in enumerate(sorted((v for v in public if v), key=len, reverse=True)):
-        marker = f"PUBLICCONTACTTOKEN{chr(65 + index // 26)}{chr(65 + index % 26)}END"
-        if marker in text:
-            raise ValueError("Marcador reservado no documento.")
+    if _PUBLIC_MARKER_PREFIX in text:
+        raise ValueError("Marcador reservado no documento.")
+    # Protect exact, administrator-approved public values, without logging them. Each
+    # occurrence keeps its ORIGINAL text (formatting variants in the allowlist must not
+    # rewrite the document).
+    originals: dict[str, str] = {}
+
+    def protect(match: re.Match[str]) -> str:
+        marker = f"{_PUBLIC_MARKER_PREFIX}{_letters(len(originals))}END"
+        originals[marker] = match.group(0)
+        return marker
+
+    for value in sorted((v for v in public if v and v.strip()), key=len, reverse=True):
         text = re.sub(
             r"\s*".join(re.escape(char) for char in value if not char.isspace()),
-            marker,
+            protect,
             text,
             flags=re.IGNORECASE,
         )
-        replacements[marker] = "[PUBLIC_CONTACT]" if for_embedding else value
-    if find_restricted_data(text, known_restricted_values=known):
-        text = str(redact_for_log(text, known_restricted_values=known))
-    text = CONTEXTUAL_PII.sub("[REDACTED_PERSONAL_DATA]", text)
-    if find_restricted_data(text, known_restricted_values=known):
+    known_re = _known_pattern(known)
+    if find_restricted_data(text):
+        text = str(redact_for_log(text))
+    if known_re is not None:
+        text = known_re.sub(KNOWN_VALUE_MARKER, text)
+    text = CONTEXTUAL_PII.sub(_contextual_sub, text)
+    if find_restricted_data(text) or (known_re is not None and known_re.search(text)):
         raise ValueError("Documento não passou pela proteção de privacidade.")
-    for marker, value in replacements.items():
-        text = text.replace(marker, value)
+    for marker, original in originals.items():
+        text = text.replace(marker, "[PUBLIC_CONTACT]" if for_embedding else original)
     return text
 
 
@@ -197,11 +305,12 @@ async def process_document_version(
     )
     if version is None:
         raise ValueError("Versão não encontrada.")
-    if version.ingestion_status == "processing":
+    if version.ingestion_status == "processing" and not is_stale_processing(version):
         await session.commit()
         return
     _transition(session, version, "processing")
     version.error_message = None
+    version.processed_at = utcnow()  # start of processing (stale detection, L-12)
     await session.execute(
         delete(Chunk).where(Chunk.tenant_id == tenant_id, Chunk.document_version_id == version_id)
     )
@@ -221,8 +330,11 @@ async def process_document_version(
         )
         if document is None:
             raise ValueError("Documento não encontrado.")
-        blocks = extract_document(
-            version.raw_content, filename=document.filename, source_type=document.source_type
+        blocks = await asyncio.to_thread(
+            extract_document,
+            version.raw_content,
+            filename=document.filename,
+            source_type=document.source_type,
         )
         known, public = await _privacy_values(session, tenant_id)
         safe_blocks = [

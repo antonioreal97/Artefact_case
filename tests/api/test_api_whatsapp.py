@@ -125,8 +125,9 @@ async def test_good_signature_routes_to_chat_and_replies(
     assert call["channel"] == "whatsapp"
     assert call["conversation_id"] is None
     assert call["text"] == "Vocês abrem domingo?"
-    expected_ref = hashlib.sha256(
-        (api_settings.api_key_pepper.get_secret_value() + WA_ID).encode()
+    # Review L-8: HMAC-SHA256 keyed with USER_REF_KEY (not sha256(pepper + wa_id)).
+    expected_ref = hmac.new(
+        api_settings.user_ref_key.get_secret_value().encode(), WA_ID.encode(), hashlib.sha256
     ).hexdigest()
     assert call["external_user_ref"] == expected_ref and WA_ID not in expected_ref
     assert fakes.whatsapp.sent == [

@@ -16,7 +16,8 @@ COPY src ./src
 COPY scripts ./scripts
 COPY alembic ./alembic
 COPY alembic.ini ./
-COPY ["Desafio Técnico AI Engineer 2026/data", "./Desafio Técnico AI Engineer 2026/data"]
+# No customer data in the image (review M-7): the seed data directory is bind-mounted
+# read-only into the one-off `seed` compose service only, and is excluded by .dockerignore.
 RUN uv sync --frozen --no-dev \
     && python -c "import tiktoken; tiktoken.get_encoding('cl100k_base'); tiktoken.get_encoding('o200k_base')" \
     && chmod -R a+rX /opt/tiktoken-cache \

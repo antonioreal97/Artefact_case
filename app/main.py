@@ -1,8 +1,10 @@
 """FastAPI application factory.
 
 Middleware (outermost first):
-1. ``RequestContextMiddleware`` - correlation id (``X-Request-ID`` in/out; generated when
-   absent or not matching ``[A-Za-z0-9._-]{1,64}``), per-request log context, timing ->
+1. ``RequestContextMiddleware`` - correlation id (``X-Request-ID`` in/out; accepted only
+   when it is a UUID or 16-64 hex characters, otherwise generated - so a client cannot put
+   phone numbers or e-mails into every log line and audit row, review L-9), per-request
+   log context, timing ->
    metrics + one ``request.completed`` log line, and the catch-all 500 handler
    (``{"error": "internal_error", "correlation_id": ...}``; never a stack trace).
 2. ``BodySizeLimitMiddleware`` - rejects oversized bodies (413) from ``Content-Length`` and
@@ -11,6 +13,9 @@ Middleware (outermost first):
 
 Exception handlers render every error as ``{"error", "detail", "correlation_id"}``;
 validation errors never echo the submitted input.
+
+``/docs``, ``/redoc`` and ``/openapi.json`` exist only when ``settings.expose_api_docs``
+(always off in prod, review L-11).
 """
 
 from __future__ import annotations
@@ -40,7 +45,10 @@ from app.core.metrics import HTTP_LATENCY, HTTP_REQUESTS
 log = get_logger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
-_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_REQUEST_ID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    r"|[0-9a-fA-F]{16,64}"
+)
 JSON_BODY_LIMIT = 1024 * 1024
 MULTIPART_ENVELOPE = 64 * 1024
 
@@ -210,6 +218,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             '`{"error", "detail", "correlation_id"}`; send `X-Request-ID` to correlate.'
         ),
         lifespan=_lifespan,
+        docs_url="/docs" if settings.expose_api_docs else None,
+        redoc_url="/redoc" if settings.expose_api_docs else None,
+        openapi_url="/openapi.json" if settings.expose_api_docs else None,
     )
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_exception_handler)

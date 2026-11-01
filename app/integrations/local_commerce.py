@@ -221,24 +221,29 @@ class LocalCommerceBackend:
         )
 
     async def get_order(self, order_id: int) -> OrderRecord | None:
+        # One JOIN query whether or not the order exists (review L-6: no second round trip
+        # that would reveal order existence through timing). Both sides filter the tenant.
         try:
             async with self._session_factory() as session:
-                order = await session.scalar(
-                    select(CommerceOrder).where(
-                        CommerceOrder.tenant_id == self.tenant_id,
-                        CommerceOrder.external_id == order_id,
+                row = (
+                    await session.execute(
+                        select(CommerceOrder, CommerceCustomer)
+                        .outerjoin(
+                            CommerceCustomer,
+                            (CommerceCustomer.tenant_id == CommerceOrder.tenant_id)
+                            & (CommerceCustomer.external_id == CommerceOrder.customer_external_id),
+                        )
+                        .where(
+                            CommerceOrder.tenant_id == self.tenant_id,
+                            CommerceOrder.external_id == order_id,
+                        )
                     )
-                )
-                if order is None:
-                    return None
-                customer = await session.scalar(
-                    select(CommerceCustomer).where(
-                        CommerceCustomer.tenant_id == self.tenant_id,
-                        CommerceCustomer.external_id == order.customer_external_id,
-                    )
-                )
+                ).first()
         except _DB_ERRORS:
             raise BackendUnavailableError(_UNAVAILABLE) from None
+        if row is None:
+            return None
+        order, customer = row
         if customer is None:
             return None  # cannot be verified -> treated like a missing order
         return OrderRecord(

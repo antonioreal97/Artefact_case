@@ -35,7 +35,7 @@ async def test_cache_hit_and_redis_degradation(caplog: pytest.LogCaptureFixture)
     provider.embed_query = AsyncMock(wraps=provider.embed_query)
     cache = AsyncMock()
     cache.get.return_value = None
-    cached = CachedQueryEmbedder(provider, cache, ttl_seconds=123)
+    cached = CachedQueryEmbedder(provider, cache, ttl_seconds=123, key=b"cache-secret")
     result = await cached.embed_query("trocas")
     key, value = cache.set.call_args.args
     assert "trocas" not in key
@@ -70,3 +70,38 @@ async def test_openai_batches_retries_dimensions_and_privacy() -> None:
     with pytest.raises(ValueError, match="privacy"):
         await provider.embed_query("cliente@example.com")
     assert create.call_count == 3
+
+
+def test_query_cache_key_is_hmac_not_plain_hash() -> None:
+    """Review L-5: the key is an HMAC of model|text, never sha256(model + text)."""
+    import hashlib
+    import hmac
+
+    provider = HashEmbeddingProvider()
+    a = CachedQueryEmbedder(provider, AsyncMock(), key=b"secret-a")
+    b = CachedQueryEmbedder(provider, AsyncMock(), key=b"secret-b")
+    text = "qual o prazo de entrega?"
+    expected = hmac.new(
+        b"secret-a", f"{provider.model_name}|{text}".encode(), hashlib.sha256
+    ).hexdigest()
+    assert a.cache_key(text) == expected
+    assert a.cache_key(text) != b.cache_key(text)
+    plain = hashlib.sha256((provider.model_name + "\0" + text).encode()).hexdigest()
+    assert plain not in {a.cache_key(text), b.cache_key(text)}
+    with pytest.raises(ValueError):
+        CachedQueryEmbedder(provider, AsyncMock(), key=b"")
+
+
+async def test_get_embedding_provider_uses_user_ref_key() -> None:
+    from pydantic import SecretStr
+
+    from app.rag.embeddings import QUERY_CACHE_PREFIX, get_embedding_provider
+
+    settings = Settings(
+        app_env="test", embedding_provider="hash", user_ref_key=SecretStr("ref-key")
+    )
+    embedder = get_embedding_provider(settings)
+    assert isinstance(embedder, CachedQueryEmbedder)
+    reference = CachedQueryEmbedder(HashEmbeddingProvider(settings), AsyncMock(), key=b"ref-key")
+    assert embedder.cache_key("x") == reference.cache_key("x")
+    assert QUERY_CACHE_PREFIX == "rag:query:"

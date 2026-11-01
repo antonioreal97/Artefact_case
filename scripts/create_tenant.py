@@ -2,6 +2,10 @@
 
 Only a newly generated credential is printed, after commit, directly to stdout.
 An environment-supplied credential is never echoed. Reruns keep the existing key.
+
+The ``seed`` key is an ADMIN key (all scopes) for operators; never embed it in a web
+widget. Set ``SEED_CHAT_API_KEY`` to also provision a ``widget`` key that holds only the
+``chat`` scope (review L-11); it is never generated or printed by this script.
 """
 
 from __future__ import annotations
@@ -24,6 +28,10 @@ from app.models import AgentSettings, ApiKey, Tenant, TenantChannel
 
 TENANT_SLUG = "emporio-da-musica"
 SCOPES = ["chat", "knowledge:write", "knowledge:read", "handoffs", "conversations:read"]
+CHAT_SCOPES = ["chat"]
+CHAT_KEY_NAME = "widget"
+CHAT_KEY_ENV = "SEED_CHAT_API_KEY"
+_KEY_FORMAT = r"emp_[a-z0-9]{8}_[A-Za-z0-9_-]{32,128}"
 # Both conflicting published phones/emails are retained, not silently reconciled.
 # Source: políticas_da_loja.pdf cover, §1.2 and §7. Include extraction variants.
 PUBLIC_CONTACT_VALUES = [
@@ -47,9 +55,54 @@ def api_key_from_env(variable: str | None) -> str | None:
     value = os.environ.get(variable)
     if not value:
         raise ValueError("The requested API-key environment variable is empty or unset")
-    if re.fullmatch(r"emp_[a-z0-9]{8}_[A-Za-z0-9_-]{32,128}", value) is None:
+    if re.fullmatch(_KEY_FORMAT, value) is None:
         raise ValueError("The API key must use emp_<8 lowercase alphanumeric>_<secret>")
     return value
+
+
+def optional_api_key_from_env(variable: str) -> str | None:
+    """Like ``api_key_from_env`` but an unset/empty variable means "not requested"."""
+    return api_key_from_env(variable) if os.environ.get(variable) else None
+
+
+async def _ensure_key(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    *,
+    name: str,
+    scopes: list[str],
+    api_key: str | None,
+    generate: bool,
+) -> str | None:
+    """Create the named key once; returns the plaintext only when it was generated here."""
+    existing = await session.scalar(
+        select(ApiKey).where(ApiKey.tenant_id == tenant_id, ApiKey.name == name)
+    )
+    if existing is not None:
+        if api_key is not None and existing.key_hash != hash_api_key(api_key):
+            raise ValueError(
+                f"A different {name} key already exists; rotate credentials explicitly"
+            )
+        return None
+    if api_key is None:
+        if not generate:
+            return None
+        full_key, prefix = generate_api_key()
+        plaintext: str | None = full_key
+    else:
+        if re.fullmatch(_KEY_FORMAT, api_key) is None:
+            raise ValueError(f"Invalid {name} API-key format")
+        full_key, prefix, plaintext = api_key, api_key.split("_", 2)[1], None
+    session.add(
+        ApiKey(
+            tenant_id=tenant_id,
+            name=name,
+            key_prefix=prefix,
+            key_hash=hash_api_key(full_key),
+            scopes=scopes,
+        )
+    )
+    return plaintext
 
 
 async def create_tenant(
@@ -57,6 +110,7 @@ async def create_tenant(
     *,
     api_key: str | None = None,
     whatsapp_phone_number_id: str | None = None,
+    chat_api_key: str | None = None,
 ) -> tuple[uuid.UUID, str | None]:
     """Stage idempotent seed configuration. Caller commits before revealing a new key."""
     await session.execute(
@@ -86,29 +140,17 @@ async def create_tenant(
                 extra={"tagline": "Sua música começa aqui."},
             )
         )
-    existing_key = await session.scalar(
-        select(ApiKey).where(ApiKey.tenant_id == tenant.id, ApiKey.name == "seed")
+    plaintext = await _ensure_key(
+        session, tenant.id, name="seed", scopes=SCOPES, api_key=api_key, generate=True
     )
-    plaintext: str | None = None
-    if existing_key is None:
-        if api_key is None:
-            full_key, prefix = generate_api_key()
-            plaintext = full_key
-        else:
-            if re.fullmatch(r"emp_[a-z0-9]{8}_[A-Za-z0-9_-]{32,128}", api_key) is None:
-                raise ValueError("Invalid seed API-key format")
-            full_key, prefix = api_key, api_key.split("_", 2)[1]
-        session.add(
-            ApiKey(
-                tenant_id=tenant.id,
-                name="seed",
-                key_prefix=prefix,
-                key_hash=hash_api_key(full_key),
-                scopes=SCOPES,
-            )
-        )
-    elif api_key is not None and existing_key.key_hash != hash_api_key(api_key):
-        raise ValueError("A different seed key already exists; rotate credentials explicitly")
+    await _ensure_key(
+        session,
+        tenant.id,
+        name=CHAT_KEY_NAME,
+        scopes=CHAT_SCOPES,
+        api_key=chat_api_key,
+        generate=False,
+    )
     if whatsapp_phone_number_id:
         channel = await session.scalar(
             select(TenantChannel).where(
@@ -137,6 +179,7 @@ async def run(api_key_variable: str | None) -> None:
                 session,
                 api_key=key,
                 whatsapp_phone_number_id=os.environ.get("WHATSAPP_PHONE_NUMBER_ID"),
+                chat_api_key=optional_api_key_from_env(CHAT_KEY_ENV),
             )
             await session.commit()
         if plaintext:

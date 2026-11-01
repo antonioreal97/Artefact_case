@@ -16,6 +16,7 @@ from typing import Annotated, Any
 
 import pydantic
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select
 
 from app.api.dependencies import (
@@ -28,8 +29,10 @@ from app.api.dependencies import (
 )
 from app.core.logging import get_logger
 from app.models import Document, DocumentVersion
+from app.rag.ingestion import is_stale_processing
 from app.rag.types import IngestionReceipt
 from app.schemas.api import (
+    NUL_MESSAGE,
     DocumentDetailOut,
     DocumentOut,
     DocumentTextRequest,
@@ -76,8 +79,20 @@ async def _read_limited(file: UploadFile, max_bytes: int) -> bytes:
 
 
 def _safe_filename(raw: str | None) -> str:
-    name = PureWindowsPath(PurePosixPath(raw or "").name).name.strip()
+    name = PureWindowsPath(PurePosixPath((raw or "").replace("\x00", "")).name).name.strip()
     return name[:300]
+
+
+def _reject_nul_form_fields(**fields: str | None) -> None:
+    """Multipart form fields bypass the JSON request models: same 422 for NUL characters
+    (PostgreSQL ``text`` cannot store them; adversarial FINDING-6). Never echoes input."""
+    errors = [
+        {"loc": ("body", name), "msg": f"Value error, {NUL_MESSAGE}", "type": "value_error"}
+        for name, value in fields.items()
+        if value is not None and "\x00" in value
+    ]
+    if errors:
+        raise RequestValidationError(errors)
 
 
 def _detect_type(filename: str, data: bytes) -> str:
@@ -204,6 +219,7 @@ async def upload_document(
 
     Response 202: `{"document_id": "…", "version_id": "…", "version": 1,
     "status": "pending", "duplicate": false}`"""
+    _reject_nul_form_fields(title=title, category=category, source_url=source_url)
     filename = _safe_filename(file.filename)
     data = await _read_limited(file, settings.max_upload_bytes)
     if not data:
@@ -357,9 +373,12 @@ async def reprocess_document_version(
     enqueue: EnqueuerDep,
     principal: WriterDep,
 ) -> IngestionReceipt:
-    """Reset a version to `pending` and enqueue ingestion again (e.g. after a failure)."""
+    """Reset a version to `pending` and enqueue ingestion again (e.g. after a failure).
+
+    A version still `processing` is refused with 409 unless it has been stuck for more than
+    15 minutes (its worker died; the arq job timeout is 5 minutes)."""
     version = await _get_version(session, principal.tenant_id, document_id, version_id)
-    if version.ingestion_status == "processing":
+    if version.ingestion_status == "processing" and not is_stale_processing(version):
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Version is being processed")
     version.ingestion_status = "pending"
     version.error_message = None

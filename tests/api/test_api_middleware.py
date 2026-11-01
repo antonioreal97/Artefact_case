@@ -15,9 +15,10 @@ async def headers(two_tenants, make_key):
 
 
 async def test_request_id_propagated_and_generated(client):
-    r = await client.get("/health", headers={"X-Request-ID": "abc-123.DEF_4"})
+    rid = "0123456789abcdefABCDEF0123456789"
+    r = await client.get("/health", headers={"X-Request-ID": rid})
     assert r.status_code == 200 and r.json() == {"status": "ok"}
-    assert r.headers["X-Request-ID"] == "abc-123.DEF_4"
+    assert r.headers["X-Request-ID"] == rid
 
     generated = await client.get("/health")
     assert len(generated.headers["X-Request-ID"]) == 32
@@ -33,12 +34,12 @@ async def test_500_hides_internals_and_returns_correlation_id(client, headers, f
     before = MODEL_ERRORS.value(error_type="RuntimeError")
     r = await client.post(
         "/v1/chat/messages",
-        headers={**headers, "X-Request-ID": "boom-1"},
+        headers={**headers, "X-Request-ID": "c000000000000001"},
         json={"message": "oi"},
     )
     assert r.status_code == 500
-    assert r.json() == {"error": "internal_error", "correlation_id": "boom-1"}
-    assert r.headers["X-Request-ID"] == "boom-1"
+    assert r.json() == {"error": "internal_error", "correlation_id": "c000000000000001"}
+    assert r.headers["X-Request-ID"] == "c000000000000001"
     assert "hunter2" not in r.text and "Traceback" not in r.text
     assert MODEL_ERRORS.value(error_type="RuntimeError") == before + 1
 

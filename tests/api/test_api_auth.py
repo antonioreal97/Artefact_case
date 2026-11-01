@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 
 from app.core.security import generate_api_key
 from app.models import ApiKey, AuditEvent, Tenant
+from app.services.attempt_limiter import InMemoryAttemptLimiter
 
 pytestmark = pytest.mark.integration
 
@@ -28,14 +29,14 @@ async def _audit_for(session_factory, correlation_id: str) -> AuditEvent:
 
 
 async def test_missing_key_401_and_audited(client, session_factory):
-    r = await client.get(URL, headers={"X-Request-ID": "auth-missing-1"})
+    r = await client.get(URL, headers={"X-Request-ID": "a000000000000001"})
     assert r.status_code == 401
     assert r.json() == {
         "error": "unauthorized",
         "detail": "Invalid or missing API key",
-        "correlation_id": "auth-missing-1",
+        "correlation_id": "a000000000000001",
     }
-    event = await _audit_for(session_factory, "auth-missing-1")
+    event = await _audit_for(session_factory, "a000000000000001")
     assert event.tenant_id is None
     assert event.data["reason"] == "missing"
 
@@ -48,19 +49,21 @@ async def test_malformed_key_401(client, bad):
 
 
 async def test_unknown_and_wrong_secret_401_audit_has_prefix_only(
-    client, session_factory, two_tenants, make_key
+    client, session_factory, two_tenants, make_key, fakes
 ):
     unknown, unknown_prefix = generate_api_key()
-    r = await client.get(URL, headers={"X-API-Key": unknown, "X-Request-ID": "auth-unknown"})
+    r = await client.get(URL, headers={"X-API-Key": unknown, "X-Request-ID": "a000000000000002"})
     assert r.status_code == 401
-    event = await _audit_for(session_factory, "auth-unknown")
+    event = await _audit_for(session_factory, "a000000000000002")
     assert event.data == {"reason": "unknown", "key_prefix": unknown_prefix, "route": URL}
 
+    # Audit rows are sampled to one per IP per minute: start a fresh window.
+    fakes.limiter = InMemoryAttemptLimiter()
     real = await make_key(two_tenants[0])
     tampered = real[:-4] + ("AAAA" if not real.endswith("AAAA") else "BBBB")
-    r = await client.get(URL, headers={"X-API-Key": tampered, "X-Request-ID": "auth-bad"})
+    r = await client.get(URL, headers={"X-API-Key": tampered, "X-Request-ID": "a000000000000003"})
     assert r.status_code == 401
-    event = await _audit_for(session_factory, "auth-bad")
+    event = await _audit_for(session_factory, "a000000000000003")
     assert event.data["reason"] == "bad_secret"
     assert tampered.split("_", 2)[2] not in str(event.data)
     assert real.split("_", 2)[2] not in str(event.data)

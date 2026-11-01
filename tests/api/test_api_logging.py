@@ -32,7 +32,7 @@ async def test_request_logs_have_no_pii_or_key(client, two_tenants, make_key, lo
     key = await make_key(two_tenants[0])
     r = await client.post(
         "/v1/chat/messages",
-        headers={"X-API-Key": key, "X-Request-ID": "log-test-1"},
+        headers={"X-API-Key": key, "X-Request-ID": "b000000000000001"},
         json={"message": MESSAGE},
     )
     assert r.status_code == 200
@@ -47,7 +47,7 @@ async def test_request_logs_have_no_pii_or_key(client, two_tenants, make_key, lo
     for needle in (EMAIL, "98765", "pedido 4521", key, key.split("_", 2)[2], "Meu email"):
         assert needle not in output, needle
     completed = [ln for ln in lines if ln["event"] == "request.completed"]
-    first = next(ln for ln in completed if ln.get("correlation_id") == "log-test-1")
+    first = next(ln for ln in completed if ln.get("correlation_id") == "b000000000000001")
     assert first["route"] == "/v1/chat/messages" and first["status_code"] == 200
     assert first["tenant_id"] == str(two_tenants[0])
     turn = next(ln for ln in lines if ln["event"] == "chat.turn_completed")

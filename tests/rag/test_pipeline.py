@@ -338,13 +338,14 @@ async def test_pii_redacted_before_embedding_and_injection_flagged(
         )
     )
     assert chunk and chunk.meta["suspicious_instructions"] and chunk.meta["pii_redacted"]
-    assert "loja@example.com" in chunk.content and "(67) 3341-4444" in chunk.content
+    # Public contacts keep the document's own formatting (review M-6).
+    assert "loja@example.com" in chunk.content and "(67) 3341 - 4444" in chunk.content
     assert "[REDACTED_" in chunk.content
     assert "system prompt" in chunk.content
     assert "Pessoa Sintética" not in chunk.content
     assert (
         redact_document_text("Nome: Nome Novo\nEndereço: Rua Um, 123", [], [])
-        == "[REDACTED_PERSONAL_DATA]\n[REDACTED_PERSONAL_DATA]"
+        == "Nome: [REDACTED_PERSONAL_DATA]\nEndereço: [REDACTED_PERSONAL_DATA]"
     )
 
 

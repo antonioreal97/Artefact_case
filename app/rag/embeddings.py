@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import math
@@ -121,10 +122,34 @@ class QueryCache(Protocol):
     async def set(self, key: str, value: str, *, ex: int) -> object: ...
 
 
+QUERY_CACHE_PREFIX = "rag:query:"
+
+
 class CachedQueryEmbedder:
+    """Redis cache for query embeddings.
+
+    Key: ``rag:query:`` + HMAC-SHA256(secret, model | text) (review L-5) - no raw or unsalted
+    hash of the customer's question is stored, so cached keys cannot be matched against a
+    dictionary of likely questions without the secret.
+
+    Residual risk (accepted, documented): the key is NOT tenant-scoped. A query embedding is
+    a tenant-neutral function of (model, text) and holds no tenant data, so sharing it is
+    not a data leak; the only side channel is cache-hit latency revealing that *someone*
+    asked the identical text within the TTL. ``embed_query`` has no tenant parameter in the
+    frozen ``EmbeddingProvider`` contract (app/rag/types.py).
+    """
+
     def __init__(
-        self, provider: EmbeddingProvider, redis: QueryCache, ttl_seconds: int = 3600
+        self,
+        provider: EmbeddingProvider,
+        redis: QueryCache,
+        ttl_seconds: int = 3600,
+        *,
+        key: bytes,
     ) -> None:
+        if not key:
+            raise ValueError("A non-empty HMAC key is required for the query cache")
+        self._key = key
         self.provider = provider
         self.redis = redis
         self.ttl_seconds = ttl_seconds
@@ -134,8 +159,12 @@ class CachedQueryEmbedder:
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return await self.provider.embed_documents(texts)
 
+    def cache_key(self, text: str) -> str:
+        message = (self.model_name + "|" + text).encode("utf-8")
+        return hmac.new(self._key, message, hashlib.sha256).hexdigest()
+
     async def embed_query(self, text: str) -> list[float]:
-        key = "rag:query:" + hashlib.sha256((self.model_name + "\0" + text).encode()).hexdigest()
+        key = QUERY_CACHE_PREFIX + self.cache_key(text)
         try:
             cached = await self.redis.get(key)
             if cached:
@@ -166,4 +195,7 @@ def get_embedding_provider(settings: Settings) -> EmbeddingProvider:
     redis = Redis.from_url(
         settings.redis_url, decode_responses=True, socket_connect_timeout=1, socket_timeout=1
     )
-    return CachedQueryEmbedder(provider, redis, settings.query_embedding_cache_ttl_seconds)
+    secret = settings.user_ref_key.get_secret_value() or settings.api_key_pepper.get_secret_value()
+    return CachedQueryEmbedder(
+        provider, redis, settings.query_embedding_cache_ttl_seconds, key=secret.encode("utf-8")
+    )

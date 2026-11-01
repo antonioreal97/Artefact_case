@@ -1,17 +1,25 @@
-"""Human handoff requests (scope ``handoffs``). Tenant-scoped in SQL; foreign ids -> 404."""
+"""Human handoff requests (scope ``handoffs``). Tenant-scoped in SQL; foreign ids -> 404.
+
+Summaries are stored redacted (adversarial FINDING-3): the chat-path minimization rules
+(``app.services.privacy.redact_user_text``: contacts, CPF, addresses, self-introductions,
+order references, known customer names) run first, with the tenant's customer names; then
+pattern + known-value redaction (e-mails/phones) and every number equal to one of the
+tenant's order ids. Tokens become ``[REDACTED_<KIND>]`` markers (the vault is discarded)."""
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import Principal, SessionDep, require_scope
 from app.core.logging import bind_conversation_id, get_logger
 from app.core.metrics import HANDOFFS
-from app.models import AuditEvent, Conversation, HandoffRequest
+from app.models import AuditEvent, CommerceCustomer, CommerceOrder, Conversation, HandoffRequest
 from app.schemas.api import (
     ErrorResponse,
     HandoffCreateRequest,
@@ -19,6 +27,8 @@ from app.schemas.api import (
     HandoffStatus,
     HandoffUpdateRequest,
 )
+from app.services.privacy import redact_user_text
+from app.services.privacy_vault import TOKEN_RE, PrivacyVault
 from emporio_agent.privacy import redact_for_log
 
 router = APIRouter(prefix="/v1/handoffs", tags=["handoffs"])
@@ -41,6 +51,34 @@ async def _get_handoff(
     if handoff is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Handoff not found")
     return handoff
+
+
+_INTEGER = re.compile(r"(?<!\w)\d{1,10}(?!\w)")
+ORDER_MARKER = "[REDACTED_ORDER]"
+
+
+async def redact_summary(session: AsyncSession, tenant_id: uuid.UUID, summary: str) -> str:
+    """Remove the tenant's restricted values from a free-text handoff summary."""
+    if not summary:
+        return summary
+    customers = (
+        await session.execute(
+            select(CommerceCustomer.name, CommerceCustomer.email, CommerceCustomer.phone).where(
+                CommerceCustomer.tenant_id == tenant_id
+            )
+        )
+    ).all()
+    order_ids = set(
+        await session.scalars(
+            select(CommerceOrder.external_id).where(CommerceOrder.tenant_id == tenant_id)
+        )
+    )
+    names = [row.name for row in customers if row.name]
+    tokenized = redact_user_text(summary, PrivacyVault(), known_restricted_values=names)
+    text = TOKEN_RE.sub(lambda m: f"[REDACTED_{m.group(1)}]", tokenized)
+    contacts = [v for row in customers for v in (row.email, row.phone) if v]
+    text = str(redact_for_log(text, known_restricted_values=[*names, *contacts]))
+    return _INTEGER.sub(lambda m: ORDER_MARKER if int(m.group()) in order_ids else m.group(), text)
 
 
 def _audit(
@@ -80,7 +118,7 @@ async def create_handoff(
         tenant_id=principal.tenant_id,
         conversation_id=conversation.id,
         reason=body.reason,
-        summary=redact_for_log(body.summary),
+        summary=await redact_summary(session, principal.tenant_id, body.summary),
         status="open",
     )
     session.add(handoff)

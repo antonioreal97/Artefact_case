@@ -6,7 +6,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from app.api.dependencies import ChatServiceDep, Principal, SessionDep, require_scope
+from app.api.dependencies import (
+    ChatServiceDep,
+    LimiterDep,
+    Principal,
+    SessionDep,
+    SettingsDep,
+    count_hit,
+    require_scope,
+    too_many_requests,
+)
 from app.core.logging import bind_conversation_id, get_logger
 from app.core.metrics import CHAT_TURNS, HANDOFFS, MODEL_ERRORS, RETRIEVAL, TOOL_ERRORS
 from app.schemas.api import ChatMessageRequest, ErrorResponse
@@ -33,13 +42,18 @@ def record_turn_metrics(reply: ChatReply, channel: str) -> None:
 @router.post(
     "/messages",
     response_model=ChatReply,
-    responses={404: {"model": ErrorResponse, "description": "Conversation not found"}},
+    responses={
+        404: {"model": ErrorResponse, "description": "Conversation not found"},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded (see Retry-After)"},
+    },
 )
 async def post_message(
     body: ChatMessageRequest,
     request: Request,
     session: SessionDep,
+    settings: SettingsDep,
     chat: ChatServiceDep,
+    limiter: LimiterDep,
     principal: Annotated[Principal, Depends(require_scope("chat"))],
 ) -> ChatReply:
     """Send a customer message (scope `chat`). Omit `conversation_id` to start a new one.
@@ -52,7 +66,14 @@ async def post_message(
     "score": 0.82}], "handoff": null, "grounded": true, "tools_used": ["search_knowledge"],
     "tool_errors": 0, "retrieved_chunks": 3, "latency_ms": 840}`
 
-    A `conversation_id` belonging to another tenant yields 404 (same as unknown)."""
+    A `conversation_id` belonging to another tenant yields 404 (same as unknown).
+    At most `CHAT_RATE_LIMIT_PER_MINUTE` turns per API key per minute (429 + `Retry-After`).
+    """
+    rate_key = f"rate:{principal.tenant_id}:chat:key:{principal.api_key_id}"
+    count = await count_hit(limiter, rate_key)
+    if count is not None and count > settings.chat_rate_limit_per_minute:
+        log.warning("chat.rate_limited")
+        raise too_many_requests()
     if body.conversation_id is not None:
         bind_conversation_id(body.conversation_id)
     try:

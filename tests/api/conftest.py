@@ -30,6 +30,7 @@ from app.models import (
 from app.models.base import utcnow
 from app.rag.types import IngestionReceipt
 from app.schemas.chat import ChatReply, ConversationNotFoundError, HandoffInfo, SourceRef
+from app.services.attempt_limiter import InMemoryAttemptLimiter
 
 ALL_SCOPES = list(deps.SCOPES)
 
@@ -216,6 +217,11 @@ class FakeRedis:
         self.data[key] = value
         return True
 
+    async def delete(self, key: str) -> int:
+        if self.fail:
+            raise ConnectionError("redis down")
+        return 1 if self.data.pop(key, None) is not None else 0
+
     async def ping(self) -> bool:
         if self.fail:
             raise ConnectionError("redis down")
@@ -237,6 +243,7 @@ class Fakes:
     enqueuer: FakeEnqueuer
     redis: FakeRedis
     whatsapp: FakeWhatsAppClient
+    limiter: InMemoryAttemptLimiter = field(default_factory=InMemoryAttemptLimiter)
 
 
 @pytest.fixture
@@ -265,6 +272,7 @@ def app(
             deps.get_ingestion_enqueuer: lambda: fakes.enqueuer,
             deps.get_redis: lambda: fakes.redis,
             deps.get_whatsapp_client: lambda: fakes.whatsapp,
+            deps.get_attempt_limiter: lambda: fakes.limiter,
         }
     )
     return application
