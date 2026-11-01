@@ -36,7 +36,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.api.dependencies import close_shared_clients
-from app.api.routes import chat, conversations, handoffs, health, knowledge, metrics
+from app.api.routes import chat, chat_ui, conversations, handoffs, health, knowledge, metrics
 from app.api.webhooks import whatsapp
 from app.core.config import Settings, get_settings
 from app.core.logging import bind_correlation_id, clear_context, configure_logging, get_logger
@@ -230,6 +230,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(metrics.router)
     app.include_router(chat.router)
+    if settings.expose_api_docs:
+        app.include_router(chat_ui.router)
     app.include_router(conversations.router)
     app.include_router(knowledge.router)
     app.include_router(handoffs.router)

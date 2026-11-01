@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Empório da Música — Conversa de teste</title>
+  <link rel="stylesheet" href="/chat/style.css">
+  <script src="/chat/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <div><p class="eyebrow">CONVERSA DE TESTE</p><h1>Empório da Música</h1><p>Sua música começa aqui</p></div>
+      <button id="new-conversation" type="button">Nova conversa</button>
+    </header>
+
+    <section class="credentials" aria-labelledby="key-label">
+      <label id="key-label" for="api-key">Chave de acesso à API</label>
+      <input id="api-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="key-help storage-note" placeholder="Cole sua chave de acesso">
+      <p id="key-help">Use a chave com escopo de chat (<code>SEED_CHAT_API_KEY</code>) quando possível; a chave administrativa, somente na máquina local.</p>
+      <p id="storage-note">A chave fica somente nesta sessão da aba. Apague o campo para removê-la.</p>
+    </section>
+
+    <section class="chat" aria-label="Conversa com o agente">
+      <div class="chat-heading"><h2>Teste o atendimento</h2><span id="conversation-state">Nova conversa</span></div>
+      <div id="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens da conversa" tabindex="0">
+        <p id="empty-state">Como podemos ajudar? Escolha uma pergunta ou escreva sua mensagem.</p>
+      </div>
+      <div id="suggestions" aria-label="Perguntas sugeridas">
+        <button type="button">Quais opções de violões disponíveis custando até R$1000?</button>
+        <button type="button">Quanto custa o Takamine GD20?</button>
+        <button type="button">Comprei e me arrependi, posso devolver?</button>
+        <button type="button">Qual o horário de funcionamento?</button>
+        <button type="button">Vocês entregam em Dourados?</button>
+        <button type="button">Quero falar com um atendente</button>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+      <form id="chat-form">
+        <label for="message">Sua mensagem</label>
+        <div class="composer">
+          <textarea id="message" rows="2" maxlength="4000" required aria-describedby="compose-help" placeholder="Escreva como um cliente…"></textarea>
+          <button id="send" type="submit">Enviar</button>
+        </div>
+        <p id="compose-help">Enter envia · Shift + Enter quebra a linha. Um turno por vez.</p>
+      </form>
+    </section>
+    <footer>Ambiente de teste — respostas dependem do provedor configurado (fake/hash ou modelo real).</footer>
+    <noscript>Ative o JavaScript para conversar com o agente.</noscript>
+  </main>
+</body>
+</html>
