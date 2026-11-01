@@ -185,6 +185,7 @@ async def test_tool_call_records(ctx_a):
     search_rec, price_rec = ctx_a.tool_calls
     assert search_rec.tool_name == "search_products" and search_rec.status == "success"
     assert "lucas@example.com" not in str(search_rec.arguments_redacted)
-    assert search_rec.result_summary == {"result_count": 0}
+    # Partial matching returns the two violões; the contact still cannot enter logs.
+    assert search_rec.result_summary == {"result_count": 2}
     assert price_rec.result_summary == {"found": True, "has_promotion": True}
     assert price_rec.latency_ms >= 0

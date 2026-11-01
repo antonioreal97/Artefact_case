@@ -101,6 +101,53 @@ _ORDER = (
 )
 _BARE_NUMBER = ("ORDER", re.compile(rf"(?<![\w.,/$#\[])(?<!R\$\s)(\d{{1,10}}){_INT_END}"))
 
+# Transport metadata is not customer text. Only actual top-level Responses items
+# receive these exemptions; JSON embedded in content/arguments cannot impersonate one.
+_OUTPUT_TYPES = frozenset(
+    {
+        "reasoning",
+        "function_call",
+        "function_call_output",
+        "file_search_call",
+        "web_search_call",
+        "computer_call",
+        "computer_call_output",
+        "code_interpreter_call",
+        "image_generation_call",
+        "local_shell_call",
+        "local_shell_call_output",
+        "compaction",
+        "custom_tool_call",
+        "custom_tool_call_output",
+        "shell_call",
+        "shell_call_output",
+        "apply_patch_call",
+        "apply_patch_call_output",
+        "tool_search_call",
+        "tool_search_output",
+        "program",
+        "program_output",
+        "additional_tools",
+        "mcp_call",
+        "mcp_list_tools",
+        "mcp_approval_request",
+        "mcp_approval_response",
+    }
+)
+_OPAQUE_FIELDS = frozenset({"id", "call_id", "encrypted_content", "status"})
+# Local application schemas, never order/customer IDs or generic `id` fields.
+_UUID_FIELDS = frozenset(
+    {
+        "conversation_id",
+        "message_id",
+        "handoff_id",
+        "document_id",
+        "document_version_id",
+        "chunk_id",
+    }
+)
+_UUID_VALUE = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+
 # The egress scanner is narrower than the user-text tokenizer: documents and tool outputs
 # legitimately say "pedidos acima de R$ 500" or "Lei nº 8.078".
 _SCAN_PATTERNS = (
@@ -245,6 +292,17 @@ def looks_restricted(redacted: str) -> bool:
     return any(pattern.search(text) for pattern in _RESIDUAL)
 
 
+def public_persona_values(assistant_name: str, store_name: str) -> list[str]:
+    """Public persona spellings, scoped to the configured tenant, not arbitrary names."""
+    store = re.sub(r"(?i)^(?:o|a)\s+", "", store_name).strip()
+    values = [assistant_name, store_name]
+    if store:
+        for role in ("Assistente", "Assistente virtual"):
+            for article in ("", "de ", "da ", "do "):
+                values.append(f"{role} {article}{store}")
+    return values
+
+
 def scan_outbound(
     payload: object,
     *,
@@ -256,12 +314,15 @@ def scan_outbound(
     Tokens and exact public business contacts are ignored only for scanning. The
     original payload is never changed. Error messages contain no values or paths.
     ``known_restricted_values`` are the tenant's customer names, e-mails and phones.
+    Top-level provider input items omit opaque transport fields from this scan only;
+    decoded customer text never gains those exemptions. Structured local identifier
+    fields require canonical UUID values; order/customer IDs remain restricted.
     """
     public_values = sorted({v for v in allowlist if v.strip()}, key=len, reverse=True)
     known = tuple(sorted({v for v in known_restricted_values if v and v.strip()}))
     known_pattern = _known_pattern(known) if known else None
 
-    def clean(value: object) -> object:
+    def clean(value: object, *, schema_ids: bool = False) -> object:
         if isinstance(value, str):
             # Tool outputs and arguments are usually JSON strings in the Responses API.
             try:
@@ -269,12 +330,19 @@ def scan_outbound(
             except (ValueError, TypeError):
                 decoded = None
             if isinstance(decoded, (dict, list, str)):
-                return clean(decoded)
+                return clean(decoded, schema_ids=schema_ids)
             result = TOKEN_RE.sub(" ", value)
+            # A role alone is not a personal name. Require a sentence boundary so
+            # "Sou o Assistente João Silva" still reaches the name detector.
+            result = re.sub(
+                r"(?i)\bsou (?:o|a) assistente(?: virtual)?(?=\s*(?:[.!?;,:]|$))",
+                " ",
+                result,
+            )
             for public in public_values:
                 normalized = r"\s*".join(re.escape(c) for c in public if not c.isspace())
                 result = re.sub(
-                    r"(?<![\w@.+-])" + normalized + r"(?![\w@.+-])",
+                    r"(?<![\w@.+-])" + normalized + r"(?![\w@+-]|\.\w)",
                     " ",
                     result,
                     flags=re.IGNORECASE,
@@ -285,10 +353,42 @@ def scan_outbound(
                 raise PrivacyBoundaryError("Outbound payload contains restricted data")
             return result if result.strip() else ""
         if isinstance(value, Mapping):
-            return {str(key): clean(child) for key, child in value.items()}
+            return {
+                str(key): clean(child, schema_ids=schema_ids and not isinstance(child, str))
+                for key, child in value.items()
+                if not (
+                    schema_ids
+                    and key in _UUID_FIELDS
+                    and isinstance(child, str)
+                    and _UUID_VALUE.fullmatch(child)
+                )
+            }
         if isinstance(value, (list, tuple)):
-            return [clean(child) for child in value]
+            return [clean(child, schema_ids=schema_ids) for child in value]
         return value
 
-    if find_restricted_data(clean(payload)):
+    def clean_item(item: object) -> object:
+        if isinstance(item, Mapping) and (
+            (isinstance(item.get("type"), str) and item.get("type") in _OUTPUT_TYPES)
+            or (item.get("type") == "message" and item.get("role") == "assistant")
+        ):
+            return {
+                str(key): clean(child, schema_ids=key == "output")
+                for key, child in item.items()
+                if key not in _OPAQUE_FIELDS
+            }
+        return clean(item)
+
+    # Never log this projection or its original encrypted/provider metadata.
+    cleaned: object
+    if isinstance(payload, Mapping) and isinstance(payload.get("input"), list):
+        cleaned = {
+            str(key): [clean_item(item) for item in child] if key == "input" else clean(child)
+            for key, child in payload.items()
+        }
+    elif isinstance(payload, list):
+        cleaned = [clean_item(item) for item in payload]
+    else:
+        cleaned = clean(payload, schema_ids=isinstance(payload, Mapping))
+    if find_restricted_data(cleaned):
         raise PrivacyBoundaryError("Outbound payload contains restricted data")

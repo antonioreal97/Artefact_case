@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import replace
 
@@ -27,10 +28,13 @@ class PrivacyGuardedModel(Model):
         inner: Model,
         allowlist: Iterable[str] = (),
         known_restricted_values: Iterable[str] = (),
+        *,
+        timeout_seconds: float | None = None,
     ) -> None:
         self.inner = inner
         self.allowlist = tuple(allowlist)
         self.known_restricted_values = tuple(known_restricted_values)
+        self.timeout_seconds = timeout_seconds
 
     def _check(
         self,
@@ -82,18 +86,21 @@ class PrivacyGuardedModel(Model):
             prompt,
             model_settings,
         )
-        return await self.inner.get_response(
-            system_instructions,
-            input,
-            settings,
-            tools,
-            output_schema,
-            handoffs,
-            ModelTracing.DISABLED if tracing.is_disabled() else ModelTracing.ENABLED_WITHOUT_DATA,
-            previous_response_id=None,
-            conversation_id=None,
-            prompt=None,
-        )
+        async with asyncio.timeout(self.timeout_seconds):
+            return await self.inner.get_response(
+                system_instructions,
+                input,
+                settings,
+                tools,
+                output_schema,
+                handoffs,
+                ModelTracing.DISABLED
+                if tracing.is_disabled()
+                else ModelTracing.ENABLED_WITHOUT_DATA,
+                previous_response_id=None,
+                conversation_id=None,
+                prompt=None,
+            )
 
     async def stream_response(
         self,
@@ -117,19 +124,22 @@ class PrivacyGuardedModel(Model):
             prompt,
             model_settings,
         )
-        async for event in self.inner.stream_response(
-            system_instructions,
-            input,
-            settings,
-            tools,
-            output_schema,
-            handoffs,
-            ModelTracing.DISABLED if tracing.is_disabled() else ModelTracing.ENABLED_WITHOUT_DATA,
-            previous_response_id=None,
-            conversation_id=None,
-            prompt=None,
-        ):
-            yield event
+        async with asyncio.timeout(self.timeout_seconds):
+            async for event in self.inner.stream_response(
+                system_instructions,
+                input,
+                settings,
+                tools,
+                output_schema,
+                handoffs,
+                ModelTracing.DISABLED
+                if tracing.is_disabled()
+                else ModelTracing.ENABLED_WITHOUT_DATA,
+                previous_response_id=None,
+                conversation_id=None,
+                prompt=None,
+            ):
+                yield event
 
     async def close(self) -> None:
         await self.inner.close()
@@ -141,10 +151,13 @@ class GuardedModelProvider(ModelProvider):
         inner: ModelProvider | Model,
         allowlist: Iterable[str] = (),
         known_restricted_values: Iterable[str] = (),
+        *,
+        timeout_seconds: float | None = None,
     ) -> None:
         self.inner = inner
         self.allowlist = tuple(allowlist)
         self.known_restricted_values = tuple(known_restricted_values)
+        self.timeout_seconds = timeout_seconds
 
     def get_model(self, model_name: str | None) -> Model:
         model = (
@@ -152,7 +165,12 @@ class GuardedModelProvider(ModelProvider):
             if isinstance(self.inner, ModelProvider)
             else self.inner
         )
-        return PrivacyGuardedModel(model, self.allowlist, self.known_restricted_values)
+        return PrivacyGuardedModel(
+            model,
+            self.allowlist,
+            self.known_restricted_values,
+            timeout_seconds=self.timeout_seconds,
+        )
 
     async def aclose(self) -> None:
         if isinstance(self.inner, ModelProvider):

@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     openai_chat_model: str = "gpt-5-mini"
     openai_embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536  # fixed by the migration's vector column
-    model_timeout_seconds: float = 30.0
+    model_timeout_seconds: float = Field(default=30.0, gt=0, le=300, allow_inf_nan=False)
+    turn_timeout_seconds: float = Field(default=75.0, gt=0, le=600, allow_inf_nan=False)
     max_agent_turns: int = 8
     # Agents SDK tracing exports to OpenAI; disabled by default (privacy policy).
     openai_tracing_enabled: bool = False

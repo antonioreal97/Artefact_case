@@ -12,8 +12,10 @@ Multi-tenancy, uploads genéricos e WhatsApp são **experimentos opcionais**,
 escolhidos pelo responsável pelo projeto, não requisitos do caso.
 
 O caminho demonstrado aqui é uma loja, uma API e provedores determinísticos.
-**Não houve validação com modelo ou embeddings reais neste ambiente.** Os testes
-verificam integração e controles exercitados, não naturalidade ou qualidade de um LLM.
+Os testes verificam integração e controles exercitados, não naturalidade ou qualidade
+de um LLM. Uma bateria manual com `gpt-5-mini` e `text-embedding-3-small` foi executada
+em 2026-11-01 (ver [validação com modelo real](#validação-com-modelo-real)); não é uma
+avaliação estatística.
 O backend consulta um snapshot importado dos CSVs, não um ERP conectado em tempo real.
 
 - [Executar com Docker (recomendado)](#executar-com-docker-recomendado)
@@ -320,6 +322,14 @@ O adaptador LangChain usa o modelo global `LANGCHAIN_CHAT_MODEL`; o campo nativo
 `chat_model` do tenant não substitui essa escolha. Streaming LangChain não é implementado:
 a API atual usa `Runner.run`, sem streaming. Falhas e timeouts mantêm o fallback/handoff local.
 
+`MODEL_TIMEOUT_SECONDS=30` limita cada chamada ao modelo, inclusive nos adaptadores
+LangChain; `TURN_TIMEOUT_SECONDS=75` limita o loop completo do agente, incluindo as
+ferramentas. Assim, várias chamadas curtas podem completar um turno que ultrapasse 30s.
+Ambos devem ser finitos e positivos: máximo de 300s por chamada e 600s por turno,
+validados também em produção. `MAX_AGENT_TURNS=8` continua limitando as iterações;
+`TOOL_TIMEOUT_SECONDS=5` continua sendo o limite individual das ferramentas.
+Um dos dois timeouts do modelo/turno gera o fallback com motivo `tool_failure`.
+
 **Não basta trocar as variáveis sobre um banco preenchido com hash embeddings.**
 Os vetores podem ter a mesma dimensão e espaços incompatíveis. Para a API, use um
 banco novo com migrações e seed já configurados para o provedor escolhido, ou reprocesse
@@ -328,8 +338,14 @@ documentos já concluídos; não há fingerprint de geração dos vetores. O har
 existente valida o caminho nativo OpenAI, cria banco descartável e gera chamadas cobradas;
 não é uma avaliação comparativa dos adaptadores LangChain.
 
-**Nenhum provedor real foi chamado nesta tarefa**, incluindo Ollama local. A validação
-usou fakes de LangChain e fake/hash; não mede qualidade, calibração de limiares nem retenção.
+A primeira execução ao vivo de LangChain com `openai:gpt-5-mini` revelou que fechar
+clientes HTTP compartilhados quebrava todos os turnos após o primeiro (D-27 / R8).
+A correção cria clientes OpenAI próprios por instância e fecha apenas clientes próprios;
+os clientes compartilhados de Anthropic permanecem abertos. Após a correção, a bateria
+manual com `openai:gpt-5-mini` via LangChain teve 22 respostas úteis e 1 encaminhamento
+correto em 27 turnos ([validação com modelo real](#validação-com-modelo-real)).
+**Anthropic e Ollama permanecem sem execução real.** Os testes de regressão usam
+transportes simulados e fake/hash; não medem qualidade, calibração de limiares nem retenção.
 Antes de uso real, verifique os termos, retenção e controles de cada provedor; `store=False`
 não substitui essa verificação. Qualquer flag LangSmith de tracing habilitada bloqueia a
 inicialização em todos os ambientes.
@@ -340,12 +356,12 @@ inicialização em todos os ambientes.
 |---|---|
 | Um agente com OpenAI Agents SDK | Sete ferramentas cobrem um único domínio; o loop limitado evita criar agentes especialistas sem necessidade. Um `GuardedModel` inspeciona cada payload antes do provedor, força `store=False` e bloqueia estado hospedado. |
 | FastAPI como interface | HTTP permite reproduzir conversas com curl e exercitar autenticação, erros e isolamento; uma interface visual não é necessária para avaliar o agente. |
-| OpenAI nativo, LangChain ou fake por configuração | LangChain adapta chat OpenAI/Anthropic/Ollama e embeddings OpenAI/Ollama; o loop segue no Agents SDK e a busca híbrida não muda. Factories explícitas evitam instalar LangGraph; LangSmith é apenas dependência transitiva, com tracing proibido. Validado offline, sem chamadas reais. |
+| OpenAI nativo, LangChain ou fake por configuração | LangChain adapta chat OpenAI/Anthropic/Ollama e embeddings OpenAI/Ollama; o loop segue no Agents SDK e a busca híbrida não muda. Factories explícitas evitam instalar LangGraph; LangSmith é apenas dependência transitiva, com tracing proibido. Regressões offline; a primeira execução real via LangChain revelou D-27; após a correção, 22 de 27 respostas úteis com `openai:gpt-5-mini`. Anthropic/Ollama não executados ao vivo. |
 | Tools para fatos operacionais | Preço, estoque, promoção, pedido e cliente vêm de consultas tipadas ao `CommerceBackend`; o modelo não gera SQL nem usa RAG para inferir esses dados. |
 | RAG somente documental | Políticas, FAQ e manuais precisam de trechos e referências; o seed contém o PDF da loja. Embeddings não substituem verificações de identidade. |
 | Busca híbrida + RRF | pgvector/cosseno captura similaridade e full-text em português captura termos exatos; Reciprocal Rank Fusion combina posições, sem somar escalas incompatíveis. A superioridade sobre busca lexical não foi medida. |
 | Suficiência antes de responder | Limiar de similaridade e cobertura lexical retêm fontes insuficientes; consultas filtram tenant, documento ativo e versão atual no SQL. É uma heurística de relevância, não prova de resposta completa. |
-| Prompt versionado | `commerce-privacy-v2` combina persona configurável com regras obrigatórias; documentos chegam em `<untrusted_document>`, como dados não confiáveis. Guardrails e autorização continuam em código. |
+| Prompt versionado | `commerce-privacy-v5` combina persona configurável com regras obrigatórias; documentos chegam em `<untrusted_document>`, como dados não confiáveis. Guardrails e autorização continuam em código. |
 | CSVs validados + vault | Tipos, referências e unicidade são validados; importação usa upsert por tenant. Dados restritos ficam locais; spans reconhecidos viram tokens reversíveis, resolvidos por ferramentas locais. Isso é pseudonimização, não anonimização. |
 | Histórico persistido | Postgres guarda conversas, mensagens originais e redigidas, fontes e execução de ferramentas; apenas a forma redigida segue ao modelo. Redis guarda o vault com TTL móvel de 24 horas. |
 
@@ -431,14 +447,47 @@ para preservar o ambiente existente; nenhuma configuração do repositório foi 
 Estado integrado após X1 (2026-11-01): `ruff` e `ruff format` limpos, mypy limpo em
 63 arquivos, 603 testes e 123 subtests passando em duas execuções seguidas, e a
 avaliação offline com todos os gates obrigatórios aprovados e 100% nas seis métricas.
-A falha intermitente O-8 continua aberta. O gerador de conversas foi executado com
-sucesso e produz os cinco arquivos de `examples/conversations/`.
-Instalação das dependências em máquina vazia e modo OpenAI não foram exercitados.
+O gerador de conversas foi executado com sucesso e produz os cinco arquivos de
+`examples/conversations/`. Instalação das dependências em máquina vazia não foi exercitada.
+
+### Validação com modelo real
+
+Em 2026-11-01 a stack Docker foi executada com `gpt-5-mini` e `text-embedding-3-small`
+contra uma bateria manual de 27 turnos (24 perguntas avulsas e uma conversa de 3 turnos).
+Cada rodada de correção (R4–R8) foi seguida de uma nova execução completa; as rodadas
+R5–R7 foram executadas duas vezes, porque o modelo não é determinístico.
+
+| Execução | Respostas úteis (de 27) |
+|---|---|
+| Antes das correções | 8 |
+| R4 | 15 |
+| R5 (A / B) | 17 / 20 |
+| R6 (A / B) | 23 / 17 |
+| R7 (A / B) | 22 / 21 |
+| R8, adaptador nativo | 19 |
+| R8, LangChain (`openai:gpt-5-mini`) | 22 |
+
+Em todas as execuções, "quero falar com um atendente" foi encaminhado corretamente.
+A primeira execução revelou que o próprio filtro de privacidade bloqueava respostas
+legítimas: IDs opacos gerados pelo provedor pareciam CEPs. Também revelou regras de
+preço e estoque estritas demais para a redação de um LLM real, busca de catálogo
+frágil a palavras extras e a singular/plural, tempo limite curto e, no caminho
+LangChain, um cliente HTTP compartilhado fechado após o primeiro turno. As causas e
+correções estão no [registro de desenvolvimento](docs/development-process.md) §4.5–4.9;
+a tabela por pergunta está em [evals/live](evals/live/2026-11-01-gpt-5-mini.md).
+
+O que ainda oscila entre execuções: a pergunta do caso cai para "sem informação" em parte
+das tentativas, o pedido sem contato às vezes é encaminhado em vez de pedir o e-mail, e
+o parcelamento sempre solicita confirmação humana, porque o manual traz regras divergentes
+de parcela mínima. É um conjunto pequeno, usado para encontrar defeitos, não uma medida
+de qualidade; Anthropic e Ollama não foram executados.
 
 ## Limitações e próximos passos
 
-- **Qualidade e grounding (A-2/A-4, O-4):** falta avaliação real, com perguntas
-  reservadas, múltiplos turnos e fontes conflitantes. Citação ou nome de produto
+- **Qualidade e grounding (A-2/A-4, O-4):** a bateria real oscila entre 19 e 23
+  respostas úteis em 27 turnos; falta uma avaliação com perguntas reservadas, mais
+  conversas de vários turnos e fontes conflitantes. As regras de saída são lexicais:
+  reduzem invenções, mas também rejeitam respostas corretas. Citação ou nome de produto
   não prova consistência de estoque, prazo ou condição. Renderizaria fatos críticos
   localmente a partir de evidência tipada e acrescentaria testes de contradição.
 - **Privacidade (A-3, O-9):** nomes desconhecidos em minúsculas e identificadores
@@ -465,9 +514,13 @@ Instalação das dependências em máquina vazia e modo OpenAI não foram exerci
 - **Retenção e observabilidade (A-13/A-14):** purge existe, mas atividade da
   conversa e vida útil de documentos não estão completas. Faltam métricas de
   uso/custo e configuração efetiva; métricas atuais são por processo.
-- **Falsos positivos (O-8/O-10):** UUIDs aleatórios podem parecer telefone e
-  disparar `privacy_guard`; negações corretas de promoção podem ser bloqueadas
-  pela regra lexical. São falhas conservadoras conhecidas, ainda abertas.
+- **Falsos positivos (O-10):** negações corretas de promoção podem ser bloqueadas
+  pela regra lexical; R5 corrigiu o caso específico em que “Custom 24” era lido
+  como preço, sem resolver toda negação de promoção. A busca parcial pode retornar
+  alternativas por termos em comum, sem garantir equivalência ao produto pedido.
+  Tenants seed existentes precisam reaplicar a configuração pública com
+  `scripts.create_tenant` para incorporar contatos/endereço faltantes. IDs opacos de transporte e UUIDs em campos próprios receberam
+  tratamento específico em R4; números em texto livre continuam sujeitos ao scanner.
 
 ## Uso de assistentes de código
 
@@ -500,6 +553,7 @@ e propôs os commits. As ferramentas identificadas por frente são:
 | X2 — este README e alinhamento documental | OpenAI Codex |
 | D1 — execução completa em Docker | OpenAI Codex |
 | L1 — camada de modelos com LangChain | OpenAI Codex |
+| R4–R8 — correções após as execuções com modelo real | Claude Code executou as baterias e diagnosticou as causas; OpenAI Codex implementou as correções |
 
 O fluxo foi: **contratos → frentes paralelas → revisão separada (R1) → testes
 adversariais (R2) → avaliação com gates (G1) → correções pelos responsáveis

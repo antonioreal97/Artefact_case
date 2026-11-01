@@ -336,3 +336,137 @@ async def test_parallel_tools_fail_when_disabled():
 def test_tracing_forbidden_in_prod(name):
     with pytest.raises(ValidationError, match="must be OFF"):
         Settings(app_env="prod", **{name: True})
+
+
+@pytest.fixture
+def offline_chat_transport(monkeypatch):
+    """Intercept HTTP client construction, retaining the real LangChain/OpenAI stack."""
+    import socket
+
+    from langchain_openai._compat import httpx
+
+    def forbid_network(*args, **kwargs):
+        raise AssertionError("Network forbidden in offline client lifecycle tests")
+
+    monkeypatch.setattr(socket.socket, "connect", forbid_network)
+    monkeypatch.setattr(socket.socket, "connect_ex", forbid_network)
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-offline",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-5-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Olá!"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 2, "total_tokens": 4},
+            },
+        )
+
+    transport = httpx.MockTransport(respond)
+    for cls in (httpx.Client, httpx.AsyncClient):
+        original = cls.__init__
+
+        def initialize(self, *args, _original=original, **kwargs):
+            kwargs.update(transport=transport, trust_env=False)
+            _original(self, *args, **kwargs)
+
+        monkeypatch.setattr(cls, "__init__", initialize)
+    return requests
+
+
+@pytest.mark.parametrize("overlapping", [False, True])
+async def test_real_openai_survives_consecutive_adapter_closes(offline_chat_transport, overlapping):
+    settings = Settings(
+        langchain_chat_model="openai:gpt-5-mini",
+        openai_api_key=SecretStr("offline-test"),
+        # Isolate the old integration's cache from other tests when reproducing the bug.
+        model_timeout_seconds=17 if overlapping else 19,
+    )
+
+    def build():
+        return LangChainModel(create_chat_model(settings), provider="openai")
+
+    first = build()
+    second = build() if overlapping else None
+    try:
+        assert (await request(first)).output[0].content[0].text == "Olá!"
+        await first.close()
+        assert first.model.http_client.is_closed
+        assert first.model.http_async_client.is_closed
+        second = second or build()
+        assert first.model.http_client is not second.model.http_client
+        assert first.model.http_async_client is not second.model.http_async_client
+        assert second.model.http_client.timeout.read == settings.model_timeout_seconds
+        assert second.model.http_async_client.timeout.read == settings.model_timeout_seconds
+        assert (await request(second)).output[0].content[0].text == "Olá!"
+        assert len(offline_chat_transport) == 2
+    finally:
+        await first.close()
+        if second is not None:
+            await second.close()
+
+
+async def test_adapter_does_not_close_borrowed_openai_clients(offline_chat_transport):
+    from langchain_openai import ChatOpenAI
+    from openai import DefaultAsyncHttpxClient, DefaultHttpxClient
+
+    sync = DefaultHttpxClient()
+    async_client = DefaultAsyncHttpxClient()
+    try:
+        model = ChatOpenAI(
+            model="gpt-5-mini",
+            api_key=SecretStr("offline-test"),
+            http_client=sync,
+            http_async_client=async_client,
+            use_responses_api=False,
+            max_retries=0,
+        )
+        first = LangChainModel(model, provider="openai")
+        second = LangChainModel(model, provider="openai")
+        await first.close()
+        assert not sync.is_closed and not async_client.is_closed
+        assert (await request(second)).output[0].content[0].text == "Olá!"
+        await second.close()
+        assert not sync.is_closed and not async_client.is_closed
+        assert len(offline_chat_transport) == 1
+    finally:
+        await async_client.aclose()
+        sync.close()
+
+
+async def test_anthropic_shared_clients_remain_open():
+    settings = Settings(
+        langchain_chat_model="anthropic:claude-test",
+        anthropic_api_key=SecretStr("offline-test"),
+    )
+    first, second = create_chat_model(settings), create_chat_model(settings)
+    sync = first._client._client
+    async_client = first._async_client._client
+    assert second._client._client is sync
+    assert second._async_client._client is async_client
+    await LangChainModel(first, provider="anthropic").close()
+    await LangChainModel(second, provider="anthropic").close()
+    assert not sync.is_closed and not async_client.is_closed
+
+
+async def test_ollama_factory_closes_only_its_own_clients():
+    settings = Settings(langchain_chat_model="ollama:local-test")
+    first, second = create_chat_model(settings), create_chat_model(settings)
+    adapter = LangChainModel(first, provider="ollama")
+    try:
+        await adapter.close()
+        await adapter.close()
+        assert first._client._client.is_closed and first._async_client._client.is_closed
+        assert not second._client._client.is_closed and not second._async_client._client.is_closed
+    finally:
+        await LangChainModel(second, provider="ollama").close()
