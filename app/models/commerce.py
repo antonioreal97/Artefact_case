@@ -82,6 +82,7 @@ class CommerceOrder(UUIDPk, TenantScoped, Base):
 
 class CommerceOrderItem(UUIDPk, TenantScoped, Base):
     __tablename__ = "commerce_order_items"
+    __table_args__ = (UniqueConstraint("tenant_id", "order_external_id", "product_external_id"),)
 
     order_external_id: Mapped[int] = mapped_column(Integer, index=True)
     product_external_id: Mapped[int] = mapped_column(Integer)
