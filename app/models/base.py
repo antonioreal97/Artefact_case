@@ -25,7 +25,7 @@ class TenantScoped:
     Repositories MUST filter by tenant_id in SQL; never rely on the model/prompt."""
 
     @declared_attr
-    def tenant_id(cls) -> Mapped[uuid.UUID]:  # noqa: N805
+    def tenant_id(cls) -> Mapped[uuid.UUID]:
         return mapped_column(
             Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False
         )

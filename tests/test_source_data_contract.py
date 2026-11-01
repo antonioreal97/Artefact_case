@@ -2,7 +2,6 @@ import csv
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = next(ROOT.glob("Desafio T*AI Engineer 2026")) / "data"
 
@@ -34,9 +33,7 @@ class SourceDataContractTests(unittest.TestCase):
 
     def test_active_promotions_are_the_expected_fixture_set(self):
         active_ids = {
-            promotion_id
-            for promotion_id, row in self.promotions.items()
-            if row["is_active"] == "1"
+            promotion_id for promotion_id, row in self.promotions.items() if row["is_active"] == "1"
         }
         self.assertEqual(active_ids, {"12", "14", "19", "24"})
         self.assertEqual(self.promotions["24"]["product_id"], "94")
@@ -57,4 +54,3 @@ class SourceDataContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

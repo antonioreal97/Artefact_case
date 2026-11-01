@@ -654,12 +654,29 @@ uv run pytest -q
 Key probe snippet (H-1). The other probes follow the same pattern:
 
 ```python
-model = ScriptedModel([step for _ in range(6) for step in (
-    ModelStep(output=[function_call("lookup_order", {"order_token": "[[ORDER_1]]",
-                                                     "contact_token": "[[EMAIL_1]]"}, call_id=...)]),
-    ModelStep(output=[assistant_message("Status: [[TRACKING_1]]")]))])
-service, _ = make_service(session_factory, model)        # tests/agent/test_chat.py helper
+model = ScriptedModel(
+    [
+        step
+        for _ in range(6)
+        for step in (
+            ModelStep(
+                output=[
+                    function_call(
+                        "lookup_order",
+                        {"order_token": "[[ORDER_1]]", "contact_token": "[[EMAIL_1]]"},
+                        call_id=...,
+                    )
+                ]
+            ),
+            ModelStep(output=[assistant_message("Status: [[TRACKING_1]]")]),
+        )
+    ]
+)
+service, _ = make_service(session_factory, model)  # tests/agent/test_chat.py helper
 for email in ["a@x.com", "b@x.com", "c@x.com", "ana@example.test"]:
-    r = await turn(service, session, tenant, f"pedido 8 email {email}", conv); conv = r.conversation_id
-r = await turn(service, session, tenant, "pedido 8 email ana@example.test", None)   # -> BR123456789BR
+    r = await turn(service, session, tenant, f"pedido 8 email {email}", conv)
+    conv = r.conversation_id
+r = await turn(
+    service, session, tenant, "pedido 8 email ana@example.test", None
+)  # -> BR123456789BR
 ```

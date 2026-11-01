@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Generic, Literal, TypeVar
+from typing import Literal
 
 from pydantic import BaseModel
-
-T = TypeVar("T")
 
 ToolErrorCode = Literal[
     "not_found",
@@ -22,7 +20,7 @@ class ToolError(BaseModel):
     message: str  # safe for the model and the customer; never a stack trace or PII
 
 
-class ToolResult(BaseModel, Generic[T]):
+class ToolResult[T](BaseModel):
     ok: bool
     data: T | None = None
     error: ToolError | None = None
