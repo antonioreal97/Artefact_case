@@ -182,17 +182,28 @@ def test_provider_requires_explicit_key_and_refuses_fake_in_prod():
         build_model_provider(settings, [])
 
 
-@pytest.mark.parametrize("options", [
-    {"previous_response_id": "server-state"}, {"conversation_id": "server-state"},
-    {"prompt": {"id": "hosted-prompt"}},
-])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"previous_response_id": "server-state"},
+        {"conversation_id": "server-state"},
+        {"prompt": {"id": "hosted-prompt"}},
+    ],
+)
 async def test_provider_hosted_state_is_blocked(options):
     inner = ScriptedModel()
     guarded = PrivacyGuardedModel(inner)
     params = {"previous_response_id": None, "conversation_id": None, "prompt": None, **options}
     with pytest.raises(PrivacyBoundaryError):
         await guarded.get_response(
-            "Política", "Olá", ModelSettings(), [], None, [], ModelTracing.DISABLED, **params,
+            "Política",
+            "Olá",
+            ModelSettings(),
+            [],
+            None,
+            [],
+            ModelTracing.DISABLED,
+            **params,
         )
     assert not inner.calls
 
@@ -201,14 +212,22 @@ async def test_extra_body_cannot_override_store():
     guarded = PrivacyGuardedModel(ScriptedModel())
     with pytest.raises(PrivacyBoundaryError):
         await guarded.get_response(
-            "Política", "Olá", ModelSettings(extra_body={"store": True}), [], None, [],
-            ModelTracing.DISABLED, previous_response_id=None, conversation_id=None, prompt=None,
+            "Política",
+            "Olá",
+            ModelSettings(extra_body={"store": True}),
+            [],
+            None,
+            [],
+            ModelTracing.DISABLED,
+            previous_response_id=None,
+            conversation_id=None,
+            prompt=None,
         )
 
 
 @pytest.mark.integration
 async def test_redis_roundtrip_ttl_and_corrupt_state():
-    from app.services.vault_store import RedisVaultStore, VAULT_TTL_SECONDS, VaultStoreUnavailable
+    from app.services.vault_store import VAULT_TTL_SECONDS, RedisVaultStore, VaultStoreUnavailable
 
     store = RedisVaultStore(Settings())
     tenant, conversation = uuid.uuid4(), uuid.uuid4()

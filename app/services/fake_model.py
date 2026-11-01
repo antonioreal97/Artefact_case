@@ -35,6 +35,20 @@ def _currency(value: object) -> str:
     return f"{Decimal(str(value)):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
 
 
+_GREETING = re.compile(
+    r"(?i)(?:oi|ol[aá]|bom dia|boa tarde|boa noite|obrigad[oa]|valeu|tchau)[\s!.,]*"
+    r"(?:tudo bem\??)?[\s!.]*"
+)
+_COMMERCE = re.compile(r"(?i)pre[cç]o|valor|custa|estoque|dispon[ií]vel")
+_PRODUCT = re.compile(r"(?i)produto|viol[aã]o|guitarra|piano|teclado")
+_POLICY = re.compile(
+    r"(?i)troca|devolu|defeito|garantia|desconto|pix|frete|prazo|entrega|parcel|pagamento|"
+    r"hor[aá]rio|pol[ií]tica|promo[cç]"
+)
+# Recoverable errors whose fixed tool message asks the customer for corrected data.
+_RECOVERABLE = frozenset({"invalid_input", "not_authorized", "not_found"})
+
+
 class FakeCommerceModel(ScriptedModel):
     """Uses the SDK's inspected scripted-model implementation, including streaming."""
 
@@ -87,11 +101,9 @@ class FakeCommerceModel(ScriptedModel):
                         "summary": "Solicitação de atendimento humano.",
                     },
                 )
-            if re.search(
-                r"pre[cç]o|valor|custa|estoque|dispon[ií]vel|produto|viol[aã]o|guitarra|piano|teclado",
-                text,
-                re.IGNORECASE,
-            ):
+            if _GREETING.fullmatch(text.strip()):
+                return [assistant_message("Olá! Como posso ajudar?")]
+            if _COMMERCE.search(text) or (_PRODUCT.search(text) and not _POLICY.search(text)):
                 query = re.sub(
                     r"\b(?:qual|quanto|o|a|os|as|um|uma|do|da|de|tem|voc[eê]s|"
                     r"pre[cç]o|valor|custa|estoque|dispon[ií]vel|produto|por|favor|em|[eé])\b",
@@ -117,6 +129,13 @@ class FakeCommerceModel(ScriptedModel):
         parts: list[str] = []
         for name, envelope in outputs:
             if not envelope.get("ok"):
+                error = envelope.get("error")
+                if (
+                    name == "lookup_order"
+                    and isinstance(error, dict)
+                    and error.get("code") in _RECOVERABLE
+                ):
+                    parts.append(str(error.get("message", "")))
                 continue
             data = envelope.get("data")
             if name == "search_knowledge" and isinstance(data, dict) and data.get("sufficient"):

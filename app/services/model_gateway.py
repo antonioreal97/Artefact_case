@@ -20,9 +20,17 @@ from app.services.privacy import PrivacyBoundaryError, scan_outbound
 
 
 class PrivacyGuardedModel(Model):
-    def __init__(self, inner: Model, allowlist: Iterable[str] = ()) -> None:
+    """``known_restricted_values``: the tenant's customer names, e-mails and phones."""
+
+    def __init__(
+        self,
+        inner: Model,
+        allowlist: Iterable[str] = (),
+        known_restricted_values: Iterable[str] = (),
+    ) -> None:
         self.inner = inner
         self.allowlist = tuple(allowlist)
+        self.known_restricted_values = tuple(known_restricted_values)
 
     def _check(
         self,
@@ -35,12 +43,21 @@ class PrivacyGuardedModel(Model):
     ) -> ModelSettings:
         if previous_response_id or conversation_id or prompt:
             raise PrivacyBoundaryError("Provider-hosted state is not permitted")
+        # Request overrides can re-enable provider-hosted state (store, include, background,
+        # conversation) or smuggle data outside the scanned fields. Do not accept them.
+        if (
+            model_settings.extra_body
+            or model_settings.extra_args
+            or model_settings.extra_headers
+            or model_settings.extra_query
+            or model_settings.metadata
+        ):
+            raise PrivacyBoundaryError("Provider request overrides are not permitted")
         scan_outbound(
-            {"instructions": system_instructions, "input": input}, allowlist=self.allowlist
+            {"instructions": system_instructions, "input": input},
+            allowlist=self.allowlist,
+            known_restricted_values=self.known_restricted_values,
         )
-        # extra_body can override explicit OpenAI request fields. Do not accept it.
-        if model_settings.extra_body:
-            raise PrivacyBoundaryError("Provider body overrides are not permitted")
         return replace(model_settings, store=False)
 
     async def get_response(
@@ -119,9 +136,15 @@ class PrivacyGuardedModel(Model):
 
 
 class GuardedModelProvider(ModelProvider):
-    def __init__(self, inner: ModelProvider | Model, allowlist: Iterable[str] = ()) -> None:
+    def __init__(
+        self,
+        inner: ModelProvider | Model,
+        allowlist: Iterable[str] = (),
+        known_restricted_values: Iterable[str] = (),
+    ) -> None:
         self.inner = inner
         self.allowlist = tuple(allowlist)
+        self.known_restricted_values = tuple(known_restricted_values)
 
     def get_model(self, model_name: str | None) -> Model:
         model = (
@@ -129,7 +152,7 @@ class GuardedModelProvider(ModelProvider):
             if isinstance(self.inner, ModelProvider)
             else self.inner
         )
-        return PrivacyGuardedModel(model, self.allowlist)
+        return PrivacyGuardedModel(model, self.allowlist, self.known_restricted_values)
 
     async def aclose(self) -> None:
         if isinstance(self.inner, ModelProvider):

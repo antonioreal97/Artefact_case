@@ -1,8 +1,12 @@
 """Hybrid retrieval through one tenant-scoped SQL statement.
 
 RRF combines cosine and Portuguese FTS candidate ranks. A candidate passes when
-cosine similarity >= min_similarity, or an FTS hit has cosine similarity >= half
-that threshold. FTS alone never bypasses the relevance floor. No unaccent
+cosine similarity >= min_similarity, when an FTS hit has cosine similarity >= half
+that threshold, or when it contains at least half of the query's distinct lexemes
+(lexical coverage) and has similarity >= a quarter of the threshold. FTS alone never
+removes the relevance floor. ``sufficient`` needs one returned chunk that clears the
+threshold or the coverage rule; FTS hits on one generic word ("loja") never do.
+Chunks flagged ``suspicious_instructions`` at ingestion are never served. No unaccent
 extension is required; Portuguese stemming follows the stored search vector.
 """
 
@@ -25,6 +29,11 @@ from app.rag.types import EmbeddingProvider, RetrievalFilters, RetrievalResult, 
 
 def _normalized(content: str) -> str:
     return " ".join(re.findall(r"\w+", unicodedata.normalize("NFKC", content).casefold()))
+
+
+def _covers_query(matched_terms: int, query_terms: int) -> bool:
+    """A chunk containing at least half of the query's distinct lexemes is on topic."""
+    return matched_terms > 0 and 2 * matched_terms >= query_terms
 
 
 def _near_duplicate(content: str, seen: list[str]) -> bool:
@@ -78,7 +87,7 @@ async def retrieve(
     # Only constant SQL clauses are concatenated; all filter values are bound.
     # FTS uses OR semantics over the query lexemes (plainto_tsquery with & -> |): full
     # questions rarely share every lexeme with the answer chunk; ts_rank_cd still rewards
-    # chunks matching more lexemes, and the similarity gate below still applies.
+    # chunks matching more lexemes, and the similarity/coverage gate below still applies.
     statement = text(
         """
         WITH eligible AS NOT MATERIALIZED (
@@ -90,9 +99,14 @@ async def retrieve(
             WHERE c.tenant_id = :tenant AND d.tenant_id = :tenant
               AND c.document_version_id = d.current_version_id
               AND d.status = :status
+              AND COALESCE(c.metadata ->> 'suspicious_instructions', 'false') <> 'true'
         """
         + extra
         + """
+        ), terms AS (
+            SELECT tsvector_to_array(to_tsvector('portuguese', :query)) AS lexemes,
+                   replace(plainto_tsquery('portuguese', :query)::text, ' & ', ' | ')::tsquery
+                       AS any_term
         ), vector_hits AS (
             SELECT chunk_id, row_number() OVER (
                 ORDER BY embedding <=> CAST(:embedding AS vector), chunk_id
@@ -101,12 +115,16 @@ async def retrieve(
             ORDER BY embedding <=> CAST(:embedding AS vector), chunk_id
             LIMIT :candidate_k
         ), text_hits AS (
-            SELECT chunk_id, ts_rank_cd(search_vector,
-                       replace(plainto_tsquery('portuguese', :query)::text, ' & ', ' | ')::tsquery) AS text_rank,
-                   row_number() OVER (ORDER BY ts_rank_cd(search_vector,
-                       replace(plainto_tsquery('portuguese', :query)::text, ' & ', ' | ')::tsquery) DESC, chunk_id) AS position
-            FROM eligible
-            WHERE search_vector @@ replace(plainto_tsquery('portuguese', :query)::text, ' & ', ' | ')::tsquery
+            SELECT chunk_id, ts_rank_cd(search_vector, terms.any_term) AS text_rank,
+                   cardinality(ARRAY(
+                       SELECT unnest(terms.lexemes)
+                       INTERSECT SELECT unnest(tsvector_to_array(search_vector))
+                   )) AS matched_terms,
+                   row_number() OVER (
+                       ORDER BY ts_rank_cd(search_vector, terms.any_term) DESC, chunk_id
+                   ) AS position
+            FROM eligible, terms
+            WHERE search_vector @@ terms.any_term
             ORDER BY text_rank DESC, chunk_id
             LIMIT :candidate_k
         ), candidates AS (
@@ -115,7 +133,8 @@ async def retrieve(
         SELECT e.chunk_id, e.document_id, e.document_version_id, e.document_title,
                e.category, e.source_url, e.section_title, e.page_start, e.page_end,
                e.content, 1 - (e.embedding <=> CAST(:embedding AS vector)) AS vector_similarity,
-               t.text_rank,
+               t.text_rank, COALESCE(t.matched_terms, 0) AS matched_terms,
+               (SELECT cardinality(lexemes) FROM terms) AS query_terms,
                COALESCE(1.0 / (:rrf_k + v.position), 0) +
                COALESCE(1.0 / (:rrf_k + t.position), 0) AS score
         FROM candidates c JOIN eligible e ON e.chunk_id = c.chunk_id
@@ -130,6 +149,7 @@ async def retrieve(
     chunks: list[RetrievedChunk] = []
     seen: list[str] = []
     best: float | None = None
+    sufficient = False
     for row in rows:
         similarity = float(row["vector_similarity"])
         if not math.isfinite(similarity):
@@ -137,12 +157,19 @@ async def retrieve(
         best = max(best, similarity) if best is not None else similarity
         if len(chunks) >= limit:
             continue
-        if similarity < threshold and (row["text_rank"] is None or similarity < threshold * 0.5):
+        lexical = similarity >= threshold * 0.25 and _covers_query(
+            int(row["matched_terms"]), int(row["query_terms"] or 0)
+        )
+        if (
+            similarity < threshold
+            and not lexical
+            and (row["text_rank"] is None or similarity < threshold * 0.5)
+        ):
             continue
         if _near_duplicate(row["content"], seen):
             continue
         chunks.append(RetrievedChunk.model_validate(dict(row)))
         seen.append(_normalized(row["content"]))
-    return RetrievalResult(
-        query=query, chunks=chunks, best_similarity=best, sufficient=bool(chunks)
-    )
+        # Weak FTS hits (one generic word like "loja") are context, never sufficiency.
+        sufficient = sufficient or similarity >= threshold or lexical
+    return RetrievalResult(query=query, chunks=chunks, best_similarity=best, sufficient=sufficient)

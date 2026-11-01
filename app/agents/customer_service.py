@@ -26,10 +26,11 @@ def _serialize[T](
 ) -> str:
     payload = result.model_dump(mode="json")
     scan_outbound(payload, allowlist=allowlist)
-    # Keep the actual safe result for deterministic grounding checks, not only counts.
+    # Keep the actual safe result for deterministic grounding checks. Merge, never replace:
+    # the domain tool may have recorded audit fields (failed_verifications, locked).
     for record in reversed(ctx.tool_calls):
         if record.tool_name == tool_name:
-            record.result_summary = payload
+            record.result_summary = {**record.result_summary, **payload}
             break
     return result.model_dump_json()
 
@@ -120,8 +121,10 @@ def build_customer_service_agent(agent_settings: AgentSettings) -> Agent[ToolCon
                         filters=RetrievalFilters(categories=[category] if category else None),
                         min_similarity=agent_settings.retrieval_min_similarity,
                     )
+            # Insufficient results are withheld: weak passages are never offered as sources.
+            served = found.chunks if found.sufficient else []
             existing = {chunk.chunk_id for chunk in ctx.retrieved_chunks}
-            for chunk in found.chunks:
+            for chunk in served:
                 if chunk.chunk_id not in existing:
                     ctx.retrieved_chunks.append(chunk)
                     existing.add(chunk.chunk_id)
@@ -134,7 +137,7 @@ def build_customer_service_agent(agent_settings: AgentSettings) -> Agent[ToolCon
                     + html.escape(c.content)
                     + "</untrusted_document>",
                 }
-                for c in found.chunks
+                for c in served
             ]
             result = ToolResult.success({"sources": sources, "sufficient": found.sufficient})
         except Exception:
