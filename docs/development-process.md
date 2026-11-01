@@ -125,7 +125,11 @@ reason.
 | D-20 | 2026-11-01 | Present multi-tenancy, generic uploads and WhatsApp as optional platform experiments; keep one seed-tenant/API walkthrough instead of rewriting before submission | R3 A-6 finds the breadth disproportionate to demonstrated case needs; clear scope and evidence have more value than a late rewrite | ADR 005; R3 §6; README |
 | D-21 | 2026-11-01 | Recommend a complete Docker run path, with an idempotent setup script, configurable loopback ports and a separate opt-in test image | Reproduce the whole application on the evaluator’s machine with only Docker/Compose; preserve the host Python/uv alternative and keep customer exports out of every image | Task D1; `scripts/docker_up.sh`; README “Executar com Docker”; Docker validation below |
 | D-22 | 2026-11-01 | Use LangChain only for provider-neutral chat/embedding adapters beneath the Agents SDK loop and mandatory PrivacyGuardedModel; preserve tools, vault, guardrails and hybrid retrieval | Owner decision L1 restores model-provider choice from ADR 001 without a LangGraph/retrieval rewrite; explicit factories avoid the top-level langchain/LangGraph dependency, and unavoidable transitive LangSmith tracing is forbidden in every environment | [ADR 006](adr/006-langchain-model-layer.md); L1 validation §4.4; no live provider calls |
-
+| D-23 | 2026-11-01 | Fix first-live-run false positives using schema-aware transport scanning, current-turn budget echoes, unanimous generic stock evidence and question-aware stock checks; bump Portuguese policy to commerce-privacy-v3 | Native gpt-5-mini exposed failures hidden by fake output; preserve customer-text scanning and product-price grounding. Coordinator re-scoped F6 to applying general documented policies, after confirming strong vector matches already pass | R4 offline regressions and validation §4.5; live rerun remains coordinator-owned |
+| D-24 | 2026-11-01 | Repair catalog intent/partial matching, tenant public address/persona scanning and Custom-number price parsing; prompt commerce-privacy-v4 explains geography and partial agreement | Second native-model round still exposed query and lexical false positives; preserve tenant filters, private-data scans and grounded answer + handoff | R5 evidence and offline validation §4.6; live rerun remains coordinator-owned |
+| D-25 | 2026-11-01 | Distinguish lookup offers/contact requests from answer claims; ignore vault indices and allow configured persona phrases; prompt commerce-privacy-v5 hides internal contact/tool names | R5 live answers were rejected for capability lists, placeholder digits and introductions; unsupported stock, commercial values and unrelated numbers must still fail | R6 evidence and offline validation §4.7; live rerun remains coordinator-owned |
+| D-26 | 2026-11-01 | Normalize pt-BR singular/plural catalog queries, separate per-model and agent-loop deadlines, structurally classify stock assertions, and narrow tool/handoff prompt rules in commerce-privacy-v6 | R6 live runs exposed singular category misses, 30s aggregate turn failures, a scope-list stock false positive and unrelated conflicting_sources handoffs | R7 evidence and offline validation §4.8; live rerun remains coordinator-owned |
+| D-27 | 2026-11-01 | Give factory-built LangChain OpenAI models dedicated SDK-compatible HTTP clients and close only explicitly owned clients; leave shared Anthropic clients open; require fresh stock tools on follow-up questions in commerce-privacy-v7 | J1: the LangChain path introduced by L1 / PR #1 was broken after the first request, discovered by the first live LangChain run; J2: R7 follow-up availability answers used history without current-turn stock evidence | R8 regression evidence and validation §4.9; post-fix live OpenAI rerun remains coordinator-owned, Anthropic/Ollama unexecuted live |
 
 ## 4. Open items and known limitations
 
@@ -134,11 +138,11 @@ reason.
 | O-1 | "No answer" detection: retrieval signalled sufficiency as "returned any chunk", which together with D-07 meant an off-topic question (case `noans-parking`) got an answer instead of a handoff | fixed in E3 (D-18) |
 | O-2 | Price guardrail rejected R$ amounts quoted from cited policy chunks (cases about Pix discount, minimum installment, free shipping, SEDEX time) | fixed in E2 (amounts must match this turn's tool prices or the cited chunks) |
 | O-3 | "cobrado duas vezes" (double charge) was not classified as a sensitive topic | fixed in E2 (part of M-4) |
-| O-4 | Live evaluation (real model and embeddings) not run yet: no API key in this environment | open |
+| O-4 | A first coordinator-run native gpt-5-mini/text-embedding-3-small test found material failures; R4 fixes are validated offline, with live rerun and held-out quality evaluation still pending | open; first live evidence does not establish acceptable quality |
 | O-5 | Adversarial findings FINDING-1…6 (see 4.1) | all fixed: FINDING-3/6 in F3, FINDING-1/2/4/5 in E3; no strict xfail left |
 | O-6 | Case `rag-mouthpiece`: the answer missed the expected hygiene term. Cause: the right chunk (section 4.4) had cosine similarity 0.096 with hash embeddings, below the lexical-hit floor | fixed in E3 (D-18) |
 | O-7 | Older lint debt outside the fix scopes | fixed at integration: `ruff check` and `ruff format --check` clean on the whole repo; `ToolResult` moved to PEP 695 generic syntax |
-| O-8 | Intermittent test `test_embedding_failure_is_safe`: about 4% of random UUID hex strings match the egress phone pattern, so the turn is blocked as `privacy_guard`. It fails safe, but it is a false positive of the egress scanner | open |
+| O-8 | `test_embedding_failure_is_safe` embedded a random UUID in user free text; digit runs could trigger privacy_guard before the intended embedding failure. R4 uses an alphabetic cache nonce and separately covers opaque provider/schema IDs | fixture flake fixed in R4; UUID-like free text remains scanned, not exempted |
 | O-9 | Lower-case names typed outside a self-introduction and outside the tenant's customer list are not detected (rule-based detection) | open, documented limitation |
 | O-10 | The commercial-claim output rule is lexical and conservative: it can block a correct sentence that negates a promotion | open, fails safe |
 | O-11 | A-2: `grounded` checks evidence presence and selected lexical facts, not full claim consistency (stock, dates, policy conditions); need typed evidence/local rendering and contradiction regressions | open |
@@ -370,6 +374,365 @@ the global model string, not native per-tenant model overrides. Embeddings must 
 reindexing. Provider terms/retention still require separate review. A-3/O-9 privacy limits
 and the known O-8 flake remain open; this run does not claim to resolve them.
 No implementation questions remain for L1, and no commit was created.
+
+### 4.5 First live-model fixes (R4, 2026-11-01)
+
+The coordinator's first native OpenAI run with gpt-5-mini and text-embedding-3-small
+found useful-answer failures that fake/hash tests had not exposed. R4 was implemented
+by OpenAI Codex and tested only offline; no real provider was called by this worker.
+The coordinator owns the subsequent live rerun and its quality numbers.
+
+- F1: scanning projects out `id`, `call_id`, `encrypted_content` and `status` only
+  from top-level known provider output items (including fake/LangChain equivalents).
+  Instructions, message content, call arguments, tool outputs and reasoning text
+  remain scanned, including JSON-encoded content. Local schema identifier fields
+  require a canonical UUID before exemption; order/customer IDs never qualify.
+  This projection never changes the provider request or logs opaque/encrypted data;
+  existing tracing remains disabled or enabled without data.
+- F2: the current redacted customer message supplies allowed budget amounts, with
+  equivalent Portuguese currency formats. Only budget/filter echoes before product
+  attribution qualify; a wrong product price still triggers `price` even when it
+  equals the customer's budget. Historical budgets do not grant an exemption.
+- F3/F4: generic availability requires all candidate products to agree; quantities
+  still need one product with a matching stock quantity. Terminal question marks
+  survive stock parsing, and search offers are not inventory claims. Existing X1
+  stock-zero/99-unit contradictions remain covered.
+- F5/F6: policy version `commerce-privacy-v3` adds product-name-only presentation,
+  search-first catalog guidance, lowest returned available prices for cheap options,
+  knowledge lookup for store scope/accessories, contact collection before order lookup,
+  polite out-of-scope refusal without handoff, and natural tracking/delivery labels.
+  Tool schema keys remain unchanged; the prompt maps their `_token` fields to customer
+  labels while preserving literal placeholders and local identity/reveal rules.
+  General documented geographical categories should be applied even if a city is absent.
+
+F6 investigation changed the initial hypothesis: `retrieve` already accepts a chunk
+above the similarity threshold without lexical coverage. The coordinator measured
+similarities 0.564 (§5.1) and 0.551 (§5.2) for the Dourados question, above 0.30;
+the model itself requested no_information after seeing sources. The coordinator
+therefore explicitly requested **no retrieval code change**. Controlled fake vectors
+now prove that missing location terms do not veto a strong match, while weak partial
+lexical matches remain insufficient. Thresholds were not calibrated on real embeddings
+in this task. The two existing no_answer evaluation cases must still hand off.
+
+O-8 was a separate fixture problem: its random UUID appeared in customer free text,
+not a typed identifier field. The fixture now uses a unique alphabetic nonce, retaining
+the cache bypass and the original failure assertions. Digit-bearing free text stays
+subject to the conservative privacy scanner. Schema-ID regressions cover the distinct
+live transport-ID failure deterministically.
+
+Final checks used `APP_ENV=test LLM_PROVIDER=fake EMBEDDING_PROVIDER=hash
+RUN_OPENAI_LIVE_TESTS=0` for pytest and evaluation. Added 53 regression cases; the
+initial 700-test run passed before five further boundary regressions were added.
+The two final runs below cover the complete 705-test suite.
+
+| Command | Measured result |
+|---|---|
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | 162 files already formatted |
+| `uv run mypy app` | no issues in 64 source files |
+| `uv run pytest -q` — final run 1 | 705 passed, 124 subtests passed in 36.12s; no skips, warnings or xfails |
+| `uv run pytest -q` — final run 2 | 705 passed, 124 subtests passed in 34.78s; no skips, warnings or xfails |
+| `uv run python -m scripts.eval_rag` | all hard gates PASS: tenant leakage 0, privacy violations 0/23, harness errors 0 |
+| Evaluation soft metrics | unchanged: source_hit 12/12, citation_coverage 12/12, no_answer_safety 2/2, groundedness 19/19, tool_use 4/4, handoff_reason 2/2; all 100% |
+| `git diff --check` | clean |
+
+Changed files: `app/services/privacy.py`, `app/agents/guardrails.py`,
+`app/agents/instructions.py`, `app/services/chat.py` (guardrail argument only),
+`tests/agent/test_live_model_fixes.py`, `tests/adversarial/test_adv_failures.py`,
+`tests/rag/test_retrieval_sufficiency.py`, `docs/development-process.md`, `README.md`.
+`app/services/model_gateway.py` needed no change: its existing scan call now uses the
+schema-aware projection. Demo generation was not rerun because fake-model output
+and the checked-in examples did not change.
+
+Remaining limits: prompt changes need a live rerun; lexical guardrails are not general
+semantic entailment; A-3/O-9 privacy gaps and O-10 promotion-negation false positives
+remain open. No provider thresholds, retrieval SQL, fake-model output, evaluation cases
+or example conversations were changed. The coordinator also observed imperfect source
+ranking for the store-address query; that retrieval-quality issue remains uncalibrated.
+No containers were stopped, no git staging/commit was performed, and the owner commits.
+
+
+### 4.6 Second live-model round (R5, 2026-11-01)
+
+The coordinator's second native gpt-5-mini run used R4 with the same 27 questions:
+approximately 17 useful answers versus 8 previously; the case question worked in
+three phrasings. These are coordinator observations, not a new live measurement by
+this worker. Instrumented evidence identified the following remaining failures.
+
+- **G1:** all-term catalog matching returned zero for `Yamaha C40 estoque` and
+  `guitarra promoção`, although their product-only queries returned 1 and 5.
+  Search now ignores a small documented, accent-folded Portuguese commerce-intent
+  vocabulary and tokenizes punctuation. Filtered all-term matches still win; if
+  absent, partial matches require at least one meaningful term, rank by coverage
+  then name hits, and retain category, effective-price, stock and tenant filters.
+  Seed-catalog regressions cover the exact queries and a controlled fixture covers
+  ranking and promotional-price filters. Partial results are alternatives, not proof
+  that the exact requested model exists.
+- **G2:** the checked-in seed already contains the full public street/number,
+  district, city/UF and CEP. Existing `AgentSettings` previously received no updates
+  when tenant setup reran; setup now merges missing public values without changing
+  custom settings or other tenants. Reapply `scripts.create_tenant` for an existing
+  live seed tenant. The scanner also refused an allowlisted CEP immediately before
+  a full stop; a sentence-ending dot now qualifies as a boundary, while a domain
+  suffix still cannot turn a private e-mail into an allowlisted one. Public address
+  answers pass the real ChatService path; customer addresses/CEPs still fail.
+- **G3:** persona spellings come from this tenant's configured assistant and store
+  names, including `Assistente virtual da/do ...`; both provider wrappers and the
+  final-answer scan receive them. Standalone assistant-role introductions are not
+  personal names. Tests cover model intermediate messages and final answers, names
+  after `sou o/a` or `me chamo`, unknown-store personas, and adjacent private text.
+  No generic NAME-pattern exemption or customer-data allowlist was added.
+- **G4:** all five quoted guitar prices match the CSV seed: Telecaster 5400,
+  PRS 6800, Ibanez 7500, Stratocaster 12500, Gibson 18900. The actual rejection was
+  `PRS SE Custom 24 — R$ 6.800,00`: the `cust\w*` money prefix treated **Custom**
+  as a price verb and extracted **24** as an additional amount. The prefix now
+  accepts explicit Portuguese price-verb forms. The full live answer passes with
+  newlines or slash separators; wrong prices, including another guitar's valid
+  price attached to the wrong named product, remain blocked. Apostrophes and
+  Brazilian thousands separators were not the cause; O-10 remains open generally.
+- **G5:** `commerce-privacy-v4` explicitly applies the documented “outras cidades”
+  rule when a city is not listed as metropolitan, with carriers/prazos and exact
+  freight at checkout. For partially conflicting sources, answer the common fact
+  (credit card, interest-free, up to 12 installments), cite both, identify only the
+  disputed minimum-installment detail and offer human confirmation. ChatService
+  already preserves a grounded answer plus `conflicting_sources`; a scripted
+  integration regression proves both citations and the handoff survive, so no
+  handoff-discard exception was needed. The prompt example was phrased to avoid
+  triggering the existing eight-word prompt-copy guard on the agreed factual answer.
+
+R4's uncommitted changes were preserved; R5 adds 47 regression cases. The first
+full-suite run exposed two test assumptions (shared seed tenant and all-term-only
+result counts), both corrected before the final runs. No real provider call, staging/commit or container stop was
+performed. Remaining limits: prompt compliance still needs a live rerun; A-3/O-9,
+O-10 and lexical grounding limitations remain; retrieval thresholds and real-vector
+ranking were not changed. The broader catalog search exposed an existing fake-router
+mistake: service inquiries mentioning an instrument went to `search_products`, and
+empty all-term matches had hidden that error. The offline router now sends service,
+maintenance and repair inquiries to knowledge, including when they mention a price.
+This is generic routing, not an evaluation-case exception; real-model behavior remains
+unproven. The existing catalog audit test now expects partial hits while still
+asserting contact redaction, and the seed-update regression uses its own tenant slug.
+The five demo conversations were regenerated because offline routing changed; their
+contents are byte-for-byte unchanged (no diff under `examples/conversations`).
+
+R5 changed files: `app/integrations/local_commerce.py`, `scripts/create_tenant.py`,
+`app/services/privacy.py`, `app/services/chat.py`, `app/agents/guardrails.py`,
+`app/agents/instructions.py`, `app/services/fake_model.py`,
+`tests/agent/test_live_model_round_two.py`, `tests/tools/test_catalog_tools.py`,
+`docs/development-process.md`, `README.md`. Other pending files belong to R4.
+
+All pytest/evaluation/demo commands used `APP_ENV=test LLM_PROVIDER=fake
+EMBEDDING_PROVIDER=hash RUN_OPENAI_LIVE_TESTS=0`; databases were disposable and
+existing containers were left running.
+
+| Command | Measured result |
+|---|---|
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | 163 files already formatted |
+| `uv run mypy app` | no issues in 64 source files |
+| `uv run pytest -q` — final run 1 | 752 passed, 124 subtests passed in 35.26s; no skips, warnings or xfails |
+| `uv run pytest -q` — final run 2 | 752 passed, 124 subtests passed in 35.47s; no skips, warnings or xfails |
+| `uv run python -m scripts.eval_rag` | all hard gates PASS: tenant leakage 0, privacy violations 0/23, harness errors 0 |
+| Evaluation soft metrics | unchanged from R4: source_hit 12/12, citation_coverage 12/12, no_answer_safety 2/2, groundedness 19/19, tool_use 4/4, handoff_reason 2/2; all 100% |
+| `uv run python -m scripts.demo_conversations` | five generated successfully; no content changes |
+| `git diff --check` | clean |
+
+
+### 4.7 Third live-model round (R6, 2026-11-01)
+
+The coordinator supplied two native-adapter gpt-5-mini runs of 27 questions after
+R5: run A had 17 useful answers plus two correct handoffs, and run B had 20 plus
+two. Installments now preserved the common answer with a `conflicting_sources`
+handoff. Instrumented runs isolated remaining answer-side false positives:
+
+- **H1:** the polite refusal to “Quem ganhou a copa de 2002?” listed capabilities
+  including “Buscar violões, teclados ou baterias disponíveis” and was rejected by
+  the stock rule without any tool call. A shared bounded lexical classifier now
+  recognizes lookup offers, action-list entries and assistant scope descriptions;
+  the no-source check uses it too, so fixing stock does not merely move the rejection.
+  Explicit assertions, quantities and numeric commercial values still require
+  evidence, including “Temos 3 unidades do Yamaha C40 em estoque” with no tools.
+- **H2:** the correct contact request for order 2 contained `[[ORDER_1]]`; its
+  numeric index triggered the ungrounded-claim fallback. Vault placeholders are
+  removed before numeric claim detection. Contact requests, identity-confirmation
+  requests and conditional promises to check after receiving contact are not order
+  facts. The exact captured answer is retained in the scripted regression, including
+  its historical `contact_token` wording; `commerce-privacy-v5` separately instructs
+  the model never to expose `contact_token`, `order_token`, `tool` or tool narration,
+  asking simply for the email or phone used for the purchase.
+- **H3:** the no-source branch receives the tenant name, assistant name, business
+  description and configured tagline as persona evidence. Contiguous configured
+  phrases plus greeting/identity wording are permitted, including configured
+  numbers in their original context. A founding year cannot authorize that number
+  as a discount or delivery duration. The tagline is also included in the model
+  instructions; persona coverage does not set `grounded=true` or bypass stock,
+  price, privacy or citation checks. The captured Campo Grande-MS greeting passes,
+  while “Olá! Hoje tudo com 20% de desconto.” still becomes `NO_INFORMATION`.
+
+R4/R5 pending changes were preserved. R6 adds 47 regression cases in
+`tests/agent/test_live_model_round_three.py`, including eight scripted ChatService
+cases with no model tool calls. The focused run of R4/R5/R6 and stock/grounding tests
+passed 278 tests. An initial focused run exposed the folded Portuguese conjunction
+“estoque e políticas” being mistaken for an assertion; the result pattern was
+narrowed before final validation.
+The initial full run also exposed a prompt-copy false positive in two existing
+wrong-contact/demo tests: quoting the natural contact request created an eight-word
+policy overlap. The instruction now uses the shorter “e-mail/telefone da compra”
+example; a regression exercises the longer natural customer wording against the
+unchanged prompt-copy guard. The targeted follow-up passed all 50 tests.
+
+R6 changed files: `app/agents/guardrails.py`, `app/agents/instructions.py`,
+`app/services/chat.py`, `tests/agent/test_live_model_round_three.py`, `README.md`,
+`docs/development-process.md`. Other pending changes belong to R4/R5.
+No provider calls, staging/commit, stash/reset/checkout or container stop were used.
+The fake model/router was not changed in this round. The existing demo tests
+generate all five conversations in temporary directories, verifying their behavior
+and repeatability; committed examples need no regeneration when contents are unchanged.
+
+Limits: these are bounded Portuguese lexical checks, not semantic entailment.
+The prompt prohibition on internal names requires live compliance validation;
+the exact historical contact answer is intentionally accepted by the claim check.
+The four additional stock rejections and one price rejection from the live runs
+cannot be reproduced without their text. A-3/O-9, O-10, retrieval and real-vector ranking limitations
+remain unchanged. The coordinator owns the next live rerun and README live counts.
+
+All pytest/evaluation commands used `APP_ENV=test LLM_PROVIDER=fake
+EMBEDDING_PROVIDER=hash RUN_OPENAI_LIVE_TESTS=0`, with disposable test databases.
+
+| Command | Measured result |
+|---|---|
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | 164 files already formatted |
+| `uv run mypy app` | no issues in 64 source files |
+| `uv run pytest -q` — final run 1 | 799 passed, 124 subtests passed in 38.50s; no skips, warnings or xfails |
+| `uv run pytest -q` — final run 2 | 799 passed, 124 subtests passed in 36.29s; no skips, warnings or xfails |
+| `uv run python -m scripts.eval_rag --json-out /tmp/r6-eval.json` | all hard gates PASS: tenant leakage 0, privacy violations 0/23, harness errors 0 |
+| Evaluation soft metrics | unchanged from R5: source_hit 12/12, citation_coverage 12/12, no_answer_safety 2/2, groundedness 19/19, tool_use 4/4, handoff_reason 2/2; all 100% |
+| Demo verification | all five test-generated conversations match committed examples after removing the generation date; no regeneration of committed files |
+| `git diff --check` | clean |
+
+### 4.8 Fourth live-model round (R7, 2026-11-01)
+
+The coordinator supplied two native gpt-5-mini runs after R6: run A produced
+23 useful answers plus one correct handoff out of 27, and run B produced 17 useful
+answers. These are pre-R7 observations; the coordinator owns the next live rerun.
+
+- **I1:** the seed query with category “violão” returned nothing while “violões”
+  returned ten available products up to R$1,000. Accent-folded token variants now
+  compare singular/plural forms in both categories and search terms (ões/ão,
+  ães/ão, ais/al, eis/el, ns/m and s), preserving substring matching, tenant
+  filtering, price/stock filters and exact-term preference. The exact live inputs
+  return ten products, or three with the additional Yamaha search term; unknown
+  categories remain empty.
+- **I2:** repeated tool_failure outcomes at about 30.1 seconds reflected one model
+  timeout enclosing the entire agent loop. MODEL_TIMEOUT_SECONDS (default 30)
+  now bounds each model request in the shared privacy gateway, including injected
+  and LangChain models; TURN_TIMEOUT_SECONDS (default 75) bounds Runner.run with
+  tools. Both are finite, positive and capped (300/600 seconds respectively), in
+  production too. MAX_AGENT_TURNS and tool deadlines remain in force. Scripted
+  tests prove that multiple calls can exceed the individual budget in total,
+  while an individual slow call or an exhausted turn still safely hands off.
+- **I3:** the verbatim Copa refusal now passes both stock and no-source checks.
+  With no catalog facts, stock predicates require an assertion verb, a quantity,
+  a ready-delivery assertion or a terse product predicate such as “Yamaha C40
+  disponível”. Topic nouns and modifiers inside offers do not assert stock.
+  Existing unsupported quantities and availability assertions remain rejected,
+  as do contradictions against returned stock facts. Offer/scope syntax is shared
+  with the no-source classifier so a successful refusal does not merely move to
+  another fallback.
+- **I4 / prompt:** commerce-privacy-v6 prominently forbids out-of-scope handoffs,
+  restricts conflicting_sources to contradictions about the customer's specific
+  question, and reuses search_products price/availability instead of repeating
+  get_price/check_stock. check_stock is reserved for explicit product availability
+  or quantity questions, with another call after search only for missing quantity.
+
+R4–R6 edits remain intact. R7 touches .env.example, README.md,
+app/core/config.py, app/integrations/local_commerce.py, app/services/chat.py,
+app/services/model_gateway.py, app/agents/guardrails.py, app/agents/instructions.py,
+tests/agent/test_live_model_round_three.py (prompt version only),
+tests/agent/test_live_model_round_four.py and this document.
+No real provider calls, Git staging/commit/stash/reset/checkout or container stops
+were used. The fake model is unchanged in R7; existing demo regression tests
+verify all five generated conversations and their repeatability in temporary
+directories. No committed demo regeneration was needed.
+
+These are bounded Portuguese lexical rules, not general grammatical entailment.
+Suffix variants can be ambiguous; the originals remain valid search forms.
+Prompt compliance and real-model timing still require the coordinator's live rerun.
+
+All pytest/evaluation commands used `APP_ENV=test LLM_PROVIDER=fake
+EMBEDDING_PROVIDER=hash RUN_OPENAI_LIVE_TESTS=0`, with disposable databases and
+existing containers left running. R7 adds 51 offline regression cases.
+The first focused run caught a short-word suffix omission (pães/pão) and an
+incorrect expected Yamaha count in the new test; both were corrected before
+the successful focused run (174 tests) and final validation below.
+
+| Command | Measured result |
+|---|---|
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | 165 files already formatted |
+| `uv run mypy app` | no issues in 64 source files |
+| `uv run pytest -q` — final run 1 | 850 passed, 124 subtests passed in 39.89s; no skips, warnings or xfails |
+| `uv run pytest -q` — final run 2 | 850 passed, 124 subtests passed in 39.51s; no skips, warnings or xfails |
+| `uv run python -m scripts.eval_rag --json-out /tmp/r7-eval.json` | all hard gates PASS: tenant leakage 0, privacy violations 0/23, harness errors 0 |
+| Evaluation soft metrics | unchanged from R6: source_hit 12/12, citation_coverage 12/12, no_answer_safety 2/2, groundedness 19/19, tool_use 4/4, handoff_reason 2/2; all 100% |
+| Demo verification | all five test-generated conversations pass behavior and repeatability checks; no fake model edits or committed demo regeneration |
+| `git diff --check` | clean |
+
+### 4.9 LangChain client ownership and stock follow-ups (R8, 2026-11-01)
+
+- **J1:** the first live LangChain run (`openai:gpt-5-mini`) answered the first
+  question in 11 seconds, then every later question failed in 0.0–0.1 seconds.
+  L1 / PR #1 closed OpenAI roots at the end of each turn, closing HTTP clients
+  cached process-wide by langchain-openai. The factory now supplies dedicated
+  synchronous/asynchronous clients with MODEL_TIMEOUT_SECONDS, using SDK default
+  client classes for compatibility with OpenAI 3 / httpx2 and earlier httpx SDKs.
+  Private factory model types explicitly mark ownership; borrowed models are
+  never closed based merely on their provider name. Close is repeatable and
+  attempts synchronous cleanup even if asynchronous cleanup fails.
+- Installed ChatAnthropic also caches shared HTTP clients and exposes no public
+  HTTP-client injection fields, so its adapter close is a no-op. ChatOllama
+  constructs fresh clients per instance; only factory-owned instances are closed.
+  OpenAIEmbeddings/OllamaEmbeddings were reviewed: neither the embedding adapter
+  nor its callers close their HTTP clients, so no embedding lifecycle change was
+  needed for this defect.
+- **J2:** commerce-privacy-v7 explicitly requires check_stock or search_products
+  in THIS turn when a customer asks availability of a previously mentioned
+  product ("E tem em estoque?"). History identifies the product but cannot supply
+  stock evidence; quantities require check_stock. R7 guidance reusing prices and
+  availability already obtained within the same turn remains intact.
+
+The two new real-ChatOpenAI regression cases were run before the production fix:
+**2 failed, 37 deselected in 1.14s**, both on the second request with
+`RuntimeError: Cannot send a request, as the client has been closed.` They cover
+consecutive create/request/close cycles and two overlapping model instances.
+After the fix, both succeed and each MockTransport receives exactly two requests;
+tests also verify separate clients, timeout configuration, cleanup, borrowed
+OpenAI clients, shared Anthropic clients, and independent Ollama cleanup.
+
+The initial test-fixture attempt patched httpx while this installation uses
+httpx2: two synthetic requests with the literal `offline-test` key reached the
+provider and returned 401, before the fixture was corrected. This was reported
+to and acknowledged by the coordinator; it is not lifecycle regression evidence
+or successful live validation. The corrected fixture uses the SDK-compatible
+MockTransport and blocks socket.connect/connect_ex, failing closed on networking.
+No real key was supplied by these tests. All subsequent test/evaluation runs use
+`APP_ENV=test LLM_PROVIDER=fake EMBEDDING_PROVIDER=hash RUN_OPENAI_LIVE_TESTS=0`.
+The coordinator owns successful post-fix live OpenAI validation and its numbers;
+Anthropic/Ollama remain unexecuted live. No Git staging/commit/stash/reset/checkout
+or container stops were performed; all R4–R7 changes remain in place.
+
+| Command | Measured result |
+|---|---|
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | 165 files already formatted |
+| `uv run mypy app` | no issues in 64 source files |
+| `uv run pytest -q tests/agent/test_langchain_model.py` | 42 passed in 1.98s |
+| `uv run pytest -q` — final run 1 | 855 passed, 124 subtests passed in 39.11s; no skips, warnings or xfails |
+| `uv run pytest -q` — final run 2 | 855 passed, 124 subtests passed in 38.30s; no skips, warnings or xfails |
+| `uv run python -m scripts.eval_rag --json-out /tmp/r8-eval.json` | all hard gates PASS: tenant leakage 0, privacy violations 0/23, harness errors 0 |
+| Evaluation soft metrics | source_hit 12/12, citation_coverage 12/12, no_answer_safety 2/2, groundedness 19/19, tool_use 4/4, handoff_reason 2/2; all 100% |
+| `git diff --check` | clean |
 
 ## 5. How to reproduce the evidence
 
