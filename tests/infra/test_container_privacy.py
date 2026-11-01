@@ -1,5 +1,5 @@
 """Review M-7 / L-11: no customer data in the runtime image, data mounted read-only into the
-seed service only, chat-only widget key, and the new settings documented."""
+seed/test services only, chat-only widget key, and the new settings documented."""
 
 from __future__ import annotations
 
@@ -34,17 +34,19 @@ def test_dockerignore_excludes_data_dir() -> None:
     assert DATA_DIR_NAME in [p.strip() for p in patterns]
 
 
-def test_only_seed_service_mounts_data_read_only() -> None:
+def test_only_seed_and_test_services_mount_data_read_only() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     services = compose["services"]
     mounts = {
         name: [v for v in svc.get("volumes", []) if DATA_DIR_NAME in str(v)]
         for name, svc in services.items()
     }
-    assert {name for name, found in mounts.items() if found} == {"seed"}
-    (volume,) = mounts["seed"]
-    assert volume["type"] == "bind" and volume["read_only"] is True
-    assert volume["target"] == f"/app/{DATA_DIR_NAME}/data"  # scripts.commerce.DATA_DIR
+    assert {name for name, found in mounts.items() if found} == {"seed", "test"}
+    for name in ("seed", "test"):
+        assert services[name]["profiles"] == [name]
+        (volume,) = mounts[name]
+        assert volume["type"] == "bind" and volume["read_only"] is True
+        assert volume["target"] == f"/app/{DATA_DIR_NAME}/data"  # scripts.commerce.DATA_DIR
 
 
 def test_env_example_documents_new_settings() -> None:

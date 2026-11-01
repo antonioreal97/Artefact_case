@@ -123,6 +123,7 @@ reason.
 | D-18 | 2026-11-01 | Retrieval is "sufficient" only when the best chunk reaches the similarity threshold, or when a lexical hit covers enough of the question. Lexical coverage lowers the similarity floor for that chunk. `search_knowledge` withholds insufficient sources from the model | Fixes the side effect of D-07 (O-1) without losing its recall gain. It also explains O-6: a correct chunk with strong term overlap but weak embedding similarity is kept, while an off-topic question with incidental term overlap is not | `app/rag/retrieval.py`, `tests/rag/test_retrieval_sufficiency.py` |
 | D-19 | 2026-11-01 | Disclose Claude Code, OpenAI Codex and their workflow in the root README, with explicit owner-confirmation placeholders where the tool record is missing | The case requires naming coding assistants and explaining their use; owner authorship of commits does not describe who generated the code | Case p.2; README “Uso de assistentes de código” |
 | D-20 | 2026-11-01 | Present multi-tenancy, generic uploads and WhatsApp as optional platform experiments; keep one seed-tenant/API walkthrough instead of rewriting before submission | R3 A-6 finds the breadth disproportionate to demonstrated case needs; clear scope and evidence have more value than a late rewrite | ADR 005; R3 §6; README |
+| D-21 | 2026-11-01 | Recommend a complete Docker run path, with an idempotent setup script, configurable loopback ports and a separate opt-in test image | Reproduce the whole application on the evaluator’s machine with only Docker/Compose; preserve the host Python/uv alternative and keep customer exports out of every image | Task D1; `scripts/docker_up.sh`; README “Executar com Docker”; Docker validation below |
 
 ## 4. Open items and known limitations
 
@@ -265,6 +266,52 @@ Evaluation progression over the fix waves:
 All six metrics are now at 100% in deterministic mode. That shows the pipeline is consistent,
 not that language quality is good: the fake model is rule-based (D-13), and the live run is
 still pending (O-4).
+
+### 4.3 Docker run path validation (2026-11-01)
+
+Task D1 used only its own Compose project, `emporiod1`, with `API_PORT=8010`,
+`DB_PORT=5444` and `REDIS_PORT=6390`; existing `test-rag` and `emporiofresh`
+containers were preserved. The first run began without a project database volume
+or repository `.env`; the script created `.env` with mode 600 and generated the
+key inside the runtime container without printing it. No real OpenAI calls were made.
+
+Environment: macOS/arm64, Bash 3.2.57, Docker Engine 29.7.2, Compose v5.5.1,
+Linux/arm64 image with Python 3.12.16; host-only checks used uv 0.11.18.
+Commands below inherited the project name and port exports above.
+
+| Check | Measured result |
+|---|---|
+| `./scripts/docker_up.sh --smoke` (first run) | exit 0; build, migration, seed, API and worker started; HTTP 200 and reply containing `R$` |
+| `./scripts/docker_up.sh --smoke` (second run) | exit 0; same smoke result; `.env` byte-for-byte unchanged, same key reused |
+| Seed, both runs | categories=9, products=65, promotions=25, customers=50, orders=20, order_items=22 |
+| Host `GET http://127.0.0.1:8010/health` | HTTP 200, `{"status":"ok"}` |
+| `docker compose --profile test build test` | exit 0; separate test target with development dependencies |
+| `docker compose -p emporiod1 --profile test run --rm test` | 603 passed, 123 subtests passed in 24.15s; no skips, warnings or xfails |
+| `docker compose -p emporiod1 --profile test run --rm test python -m scripts.eval_rag` | exit 0; all hard gates pass: tenant leakage 0, privacy violations 0/23, harness errors 0; all six soft metrics 100% |
+| `docker compose config -q`, with default ports and with overrides | both exit 0 |
+| `bash -n scripts/docker_up.sh` | exit 0 on Bash 3.2.57 |
+| `docker run --rm emporio-platform:local ls /app` | only alembic, alembic.ini, app, pyproject.toml, scripts, src, uv.lock; separate assertions confirmed no tests, challenge data or pytest |
+| Test image inspection without mounts | challenge data absent; data enters only the read-only test/seed bind mounts |
+| `uv run pytest tests/test_documentation_contract.py -q` | 5 passed, 31 subtests passed |
+| `uv run ruff check scripts tests` | all checks passed |
+| `docker compose -p emporiod1 down -v` | removed only the verification project's containers, network and database volume |
+
+The first test attempt exposed three skipped Redis tests because their fixture uses
+`TEST_REDIS_URL`, independently of `REDIS_URL`; the test service now explicitly sets
+both. A writable pytest cache directory removed the initial cache-permission warning.
+The final full-suite result above was measured after these corrections. The coordinator
+explicitly extended ownership to update the existing container-privacy regression test:
+only profiled `seed` and `test` may mount the dataset, both read-only; the image exclusion
+and all other privacy assertions remain enforced.
+
+Reset semantics were checked against `scripts.seed` and `scripts.create_tenant`: the
+same `.env` key can be provisioned again on an empty database; a different key is refused
+on an already seeded database. The deterministic providers remain the default.
+
+Not executed: OpenAI/live mode, a native Linux or Windows/WSL host run, PowerShell's
+manual recipe, or the optional `linux/amd64` build. ShellCheck was unavailable. Existing
+O-8 intermittent behavior remains open; these passing results do not fix it or establish
+real-model quality. No open implementation questions remain for D1.
 
 ## 5. How to reproduce the evidence
 

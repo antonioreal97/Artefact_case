@@ -16,7 +16,8 @@ O caminho demonstrado aqui é uma loja, uma API e provedores determinísticos.
 verificam integração e controles exercitados, não naturalidade ou qualidade de um LLM.
 O backend consulta um snapshot importado dos CSVs, não um ERP conectado em tempo real.
 
-- [Executar offline](#executar-offline)
+- [Executar com Docker (recomendado)](#executar-com-docker-recomendado)
+- [Executar offline com Python/uv no host](#executar-offline)
 - [Modelo real](#modo-com-modelo-real-opcional)
 - [Decisões técnicas](#decisões-técnicas)
 - [Exemplos](#exemplos-de-interação)
@@ -24,7 +25,154 @@ O backend consulta um snapshot importado dos CSVs, não um ERP conectado em temp
 - [Limitações](#limitações-e-próximos-passos)
 - [Uso de assistentes](#uso-de-assistentes-de-código)
 
+## Executar com Docker (recomendado)
+
+### Pré-requisitos e início rápido
+
+Instale apenas **Docker com Compose v2 ou superior**, com o daemon em execução.
+Não é necessário instalar Python ou `uv` no host. Execute na raiz do repositório
+com os dados fornecidos em `Desafio Técnico AI Engineer 2026/data/` (seis CSVs e
+`políticas_da_loja.pdf`). O primeiro build precisa de internet para baixar imagens,
+dependências e os encodings do tokenizer; o atendimento padrão usa fake/hash e
+não chama a OpenAI. Os dados do caso ficam fora de todas as imagens e entram
+somente por mount de leitura nos serviços opcionais `seed` e `test`.
+
+Em macOS, Linux ou Windows com WSL/Bash:
+
+```bash
+./scripts/docker_up.sh --smoke
+```
+
+Sem `--smoke`, o script faz a mesma inicialização e verifica `/health`, sem enviar
+uma mensagem. Ele cria `.env` a partir de `.env.example` somente se estiver ausente,
+gera a chave administrativa dentro do container se estiver vazia, protege o arquivo
+com modo 600 quando possível, executa migrações e seed, e inicia API e worker.
+Pode ser executado novamente: preserva a configuração e reutiliza a chave existente.
+O smoke exige HTTP 200 e `R$` na resposta à pergunta do caso.
+
+A API estará em `http://127.0.0.1:8000`, com documentação em `/docs`. O script mostra
+um exemplo de curl e o comando para carregar a chave sem exibi-la:
+
+```bash
+export SEED_API_KEY="$(grep '^SEED_API_KEY=' .env | tail -n 1 | cut -d= -f2-)"
+curl --fail-with-body --silent --show-error http://127.0.0.1:8000/v1/chat/messages \
+  -H "X-API-Key: $SEED_API_KEY" -H "Content-Type: application/json" \
+  -d '{"message":"Quais opções de violões disponíveis custando até R$1000?"}'
+```
+
+Esse carregamento assume o formato sem aspas escrito pelo script. `SEED_API_KEY`
+é administrativa: mantenha-a no terminal/servidor confiável e fora do Git.
+Se a API não ficar saudável em 90 segundos, consulte `docker compose logs api`.
+
+### Equivalente manual
+
+Para um ambiente novo, em Bash/WSL, execute os comandos abaixo. Se `.env` já
+existir, preserve-o; se já houver `SEED_API_KEY`, pule sua geração e reutilize-a.
+
+```bash
+cp .env.example .env
+docker compose build api
+SEED_API_KEY="$(docker compose run --rm --no-deps -T api python -c 'from app.core.security import generate_api_key; print(generate_api_key()[0])')"
+printf '\nSEED_API_KEY=%s\n' "$SEED_API_KEY" >> .env
+chmod 600 .env
+unset SEED_API_KEY
+docker compose up -d db redis
+docker compose --profile seed run --rm seed
+docker compose up -d api worker
+```
+
+No Windows sem WSL, use PowerShell para a cópia e geração da chave (também apenas
+em ambiente novo); depois execute os mesmos três comandos `docker compose` finais:
+
+```powershell
+Copy-Item .env.example .env
+docker compose build api
+$seedKey = docker compose run --rm --no-deps -T api python -c 'from app.core.security import generate_api_key; print(generate_api_key()[0])'
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar a chave no container' }
+Add-Content -Path .env -Encoding utf8 -Value "`nSEED_API_KEY=$seedKey"
+Remove-Variable seedKey
+```
+
+O serviço `seed` aguarda a migração via `depends_on`; não é preciso instalar nem
+executar Alembic no host. Para verificar a saúde sem curl instalado:
+
+```bash
+docker compose exec -T api python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=5).status)'
+```
+
+### Portas, parada e reset
+
+As portas padrão são API **8000**, Postgres **5434** e Redis **6380**, sempre
+publicadas apenas em `127.0.0.1`. Configure `API_PORT`, `DB_PORT` e `REDIS_PORT`
+no `.env` ou exporte-as no shell. Para uma stack isolada, por exemplo:
+
+```bash
+export COMPOSE_PROJECT_NAME=emporiod1
+export API_PORT=8010 DB_PORT=5444 REDIS_PORT=6390
+./scripts/docker_up.sh --smoke
+```
+
+No PowerShell, use `$env:API_PORT = '8010'` (e o mesmo para as outras variáveis),
+ou edite `.env`. Dentro dos containers, os serviços continuam usando `db:5432`
+e `redis:6379`; a alternativa com Python no host precisa ajustar suas URLs se
+as portas publicadas forem alteradas. Mantenha o mesmo nome de projeto e as
+mesmas variáveis em todos os comandos seguintes.
+
+```bash
+docker compose down       # para os serviços; preserva o volume do Postgres
+docker compose down -v    # apaga TODOS os dados do projeto selecionado
+```
+
+Após o reset, execute o script novamente: **a mesma chave em `.env` funciona**,
+pois o seed a provisiona no banco novo. Em um banco já inicializado, uma chave
+diferente é rejeitada; não apague nem gere outra chave a cada execução.
+
+### Modelo real dentro do Docker
+
+Configure no `.env` `OPENAI_API_KEY`, `LLM_PROVIDER=openai` e
+`EMBEDDING_PROVIDER=openai`, mantendo `OPENAI_TRACING_ENABLED=false`. Valem as
+opções e limitações de [modo com modelo real](#modo-com-modelo-real-opcional).
+**Antes de trocar hash por embeddings reais, execute `docker compose down -v`**
+na stack de demonstração e rode `./scripts/docker_up.sh` para migrar e indexar
+um banco novo; isso apaga os dados existentes e o novo seed faz chamadas cobradas.
+Reexecutar o seed sobre os vetores antigos não garante reindexação. O modo real
+não foi exercitado nesta validação.
+
+### Testes e avaliação dentro do Docker
+
+O target `test` instala as dependências de desenvolvimento e inclui os testes;
+a imagem padrão de runtime não contém esses arquivos nem essas dependências.
+Os comandos abaixo usam fake/hash, tracing desativado e testes live desligados,
+mesmo quando `.env` está configurado para modelo real:
+
+```bash
+docker compose --profile test build test
+docker compose --profile test run --rm test
+docker compose --profile test run --rm test python -m scripts.eval_rag
+```
+
+Os testes e a avaliação criam e removem bancos descartáveis usando o usuário
+local `emporio`, que tem permissão de `CREATE DATABASE`. O resultado JSON da
+avaliação fica no container descartável; para preservá-lo no host, monte uma
+pasta gravável em `/app/evals/results`. Confira skips e os três gates obrigatórios
+antes de interpretar os resultados, conforme [Testes e avaliação](#testes-e-avaliação).
+
+Validação em 2026-11-01: macOS/arm64, Bash 3.2.57, Docker Engine 29.7.2,
+Compose v5.5.1 e Python 3.12.16 dentro da imagem Linux/arm64. A stack isolada
+`emporiod1` (portas 8010/5444/6390) passou no script com smoke duas vezes,
+preservando `.env` e a chave; a suíte no container passou com **603 testes e
+123 subtests, sem skips**, e a avaliação passou nos três gates obrigatórios
+(leakage 0, privacidade 0/23, erros 0). As seis métricas determinísticas ficaram
+em 100%; isso não mede qualidade de LLM real. A imagem de runtime foi inspecionada:
+sem `tests/`, dados do desafio ou pytest. Detalhes em
+[processo de desenvolvimento](docs/development-process.md#43-docker-run-path-validation-2026-11-01).
+Windows/WSL, host Linux e build `linux/amd64` não foram executados; ShellCheck
+não estava instalado. O caminho manual PowerShell é fornecido sem validação local.
+
 ## Executar offline
+
+Alternativa com **Python/uv no host**. Para executar tudo em containers, siga
+[Executar com Docker](#executar-com-docker-recomendado).
 
 ### Pré-requisitos
 
@@ -212,6 +360,9 @@ uv run python -m scripts.demo_conversations
 
 ## Testes e avaliação
 
+Os comandos abaixo usam Python/uv no host. O roteiro de
+[testes dentro do Docker](#testes-e-avaliação-dentro-do-docker) dispensa essas instalações.
+
 Use os provedores offline e mantenha testes live desligados:
 
 ```bash
@@ -313,6 +464,7 @@ e propôs os commits. As ferramentas identificadas por frente são:
 | R3 — revisão de arquitetura | OpenAI Codex |
 | X1 — conversas de exemplo, filtro de catálogo e validação de estoque | OpenAI Codex |
 | X2 — este README e alinhamento documental | OpenAI Codex |
+| D1 — execução completa em Docker | OpenAI Codex |
 
 O fluxo foi: **contratos → frentes paralelas → revisão separada (R1) → testes
 adversariais (R2) → avaliação com gates (G1) → correções pelos responsáveis

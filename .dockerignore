@@ -13,7 +13,9 @@ htmlcov
 tmp
 memory-bank
 .DS_Store
-tests
 node_modules
 # Customer exports (PII) and the challenge brief never enter the build context (M-7).
 Desafio Técnico AI Engineer 2026
+
+# Generated evaluation output is not an image fixture.
+evals/results
