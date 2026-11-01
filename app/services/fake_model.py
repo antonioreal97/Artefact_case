@@ -29,6 +29,7 @@ from agents.tool import Tool
 from openai.types.responses.response_prompt_param import ResponsePromptParam
 
 from app.agents.guardrails import NO_INFORMATION, check_input
+from app.services.privacy import fold_text
 
 
 def _currency(value: object) -> str:
@@ -39,14 +40,43 @@ _GREETING = re.compile(
     r"(?i)(?:oi|ol[aá]|bom dia|boa tarde|boa noite|obrigad[oa]|valeu|tchau)[\s!.,]*"
     r"(?:tudo bem\??)?[\s!.]*"
 )
-_COMMERCE = re.compile(r"(?i)pre[cç]o|valor|custa|estoque|dispon[ií]vel")
-_PRODUCT = re.compile(r"(?i)produto|viol[aã]o|guitarra|piano|teclado")
+_COMMERCE = re.compile(r"(?i)pre[cç]o|valor|custa|estoque|dispon[ií]ve(?:l|is)")
+_PRODUCT = re.compile(r"(?i)produto|viol(?:[aã]o|[oõ]es)|guitarra|piano|teclado")
+_IN_STOCK = re.compile(r"(?i)\bdispon[ií]ve(?:l|is)\b|\bem estoque\b")
+_MAX_PRICE = re.compile(
+    r"(?i)\b(?:at[eé]|abaixo de|no m[aá]ximo)\s*(?:R\$\s*)?"
+    r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)"
+    r"(?:\s*reais)?"
+)
 _POLICY = re.compile(
     r"(?i)troca|devolu|defeito|garantia|desconto|pix|frete|prazo|entrega|parcel|pagamento|"
     r"hor[aá]rio|pol[ií]tica|promo[cç]"
 )
 # Recoverable errors whose fixed tool message asks the customer for corrected data.
 _RECOVERABLE = frozenset({"invalid_input", "not_authorized", "not_found"})
+
+
+def _catalog_arguments(text: str) -> dict[str, object]:
+    """Small Portuguese filter grammar for the offline demo, not general NLU."""
+    arguments: dict[str, object] = {"in_stock_only": bool(_IN_STOCK.search(text))}
+    maximum = _MAX_PRICE.search(text)
+    if maximum:
+        raw = maximum.group(1)
+        if "," in raw or re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw):
+            raw = raw.replace(".", "").replace(",", ".")
+        arguments["max_price"] = float(Decimal(raw))
+    query = _MAX_PRICE.sub(" ", text)
+    query = re.sub(r"(?i)\bviol[oõ]es\b", "violão", query)
+    query = re.sub(
+        r"\b(?:qual|quais|op[cç][oõ]es|quanto|o|a|os|as|um|uma|do|da|de|tem|voc[eê]s|"
+        r"pre[cç]o|valor|custa(?:ndo)?|estoque|dispon[ií]ve(?:l|is)|produto|por|favor|em|[eé])\b",
+        " ",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(r"[^\w\s-]", " ", query)
+    arguments["query"] = " ".join(query.split()) or None
+    return arguments
 
 
 class FakeCommerceModel(ScriptedModel):
@@ -104,16 +134,11 @@ class FakeCommerceModel(ScriptedModel):
             if _GREETING.fullmatch(text.strip()):
                 return [assistant_message("Olá! Como posso ajudar?")]
             if _COMMERCE.search(text) or (_PRODUCT.search(text) and not _POLICY.search(text)):
-                query = re.sub(
-                    r"\b(?:qual|quanto|o|a|os|as|um|uma|do|da|de|tem|voc[eê]s|"
-                    r"pre[cç]o|valor|custa|estoque|dispon[ií]vel|produto|por|favor|em|[eé])\b",
-                    " ",
-                    text,
-                    flags=re.IGNORECASE,
-                )
-                query = re.sub(r"[^\w\s-]", " ", query).strip()
-                return self._call("search_products", {"query": " ".join(query.split())})
-            return self._call("search_knowledge", {"query": text, "category": None})
+                return self._call("search_products", _catalog_arguments(text))
+            # Hash retrieval needs shared lexemes; normalize common return paraphrases.
+            query = re.sub(r"(?i)\barrependi\b", "arrependimento", text)
+            query = re.sub(r"(?i)\bdevolver\b", "devolução", query)
+            return self._call("search_knowledge", {"query": query, "category": None})
         if re.search(r"estoque|dispon[ií]vel", text, re.IGNORECASE):
             for name, envelope in outputs:
                 data = envelope.get("data")
@@ -121,7 +146,7 @@ class FakeCommerceModel(ScriptedModel):
                     data = data.get("items")
                 if name == "search_products" and envelope.get("ok") and isinstance(data, list):
                     if (
-                        data
+                        len(data) == 1
                         and isinstance(data[0], dict)
                         and not any(n == "check_stock" for n, _ in outputs)
                     ):
@@ -141,6 +166,25 @@ class FakeCommerceModel(ScriptedModel):
             if name == "search_knowledge" and isinstance(data, dict) and data.get("sufficient"):
                 sources = data.get("sources", [])
                 if isinstance(sources, list):
+                    # Bound the two demo intents to their relevant returned section;
+                    # the text and citation still come exclusively from the tool.
+                    topic = fold_text(text)
+                    section = (
+                        "arrependimento"
+                        if re.search(r"arrepend", topic)
+                        else "dados da empresa"
+                        if "endereco" in topic
+                        else None
+                    )
+                    if section:
+                        relevant = [
+                            source
+                            for source in sources
+                            if isinstance(source, dict)
+                            and section in fold_text(str(source.get("content", "")))
+                        ]
+                        if relevant:
+                            sources = relevant
                     for source in sources:
                         if not isinstance(source, dict):
                             continue
@@ -167,14 +211,22 @@ class FakeCommerceModel(ScriptedModel):
             elif (
                 name == "lookup_order" and isinstance(data, dict) and data.get("identity_verified")
             ):
-                parts.append(
-                    f"Situação: {data.get('order_status', data.get('status', 'confirmada'))}."
-                )
-                for value in data.values():
+                status = str(data.get("order_status", data.get("status", "unknown")))
+                translated = {
+                    "pending": "pendente",
+                    "confirmed": "confirmado",
+                    "shipped": "enviado",
+                    "delivered": "entregue",
+                    "cancelled": "cancelado",
+                    "unknown": "não informada",
+                }.get(status, "não informada")
+                parts.append(f"Situação: {translated}.")
+                for key, value in data.items():
                     if isinstance(value, str) and re.fullmatch(
                         r"\[\[(?:TRACKING|DATE)_\d+\]\]", value
                     ):
-                        parts.append(value)
+                        label = "Rastreamento" if key == "tracking_token" else "Previsão de entrega"
+                        parts.append(f"{label}: {value}")
             elif name == "request_human_handoff":
                 parts.append("Solicitei atendimento humano para ajudar com sua dúvida.")
         return [assistant_message("\n".join(parts) if parts else NO_INFORMATION)]

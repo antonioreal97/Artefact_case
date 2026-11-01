@@ -288,6 +288,102 @@ def _ngrams(text: str, n: int = 8) -> set[tuple[str, ...]]:
     return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
 
 
+_STOCK_NEGATIVE = re.compile(
+    r"\bindisponive(?:l|is)\b|\besgotad[oa]s?\b|\bem falta\b|\b(?:sem|fora de) estoque\b|"
+    r"\bnao (?:esta |estao |ha |temos |tem )?"
+    r"(?:disponive(?:l|is)(?: em estoque)?|(?:em )?estoque)\b"
+)
+_STOCK_POSITIVE = re.compile(r"\bdisponive(?:l|is)\b|\bem estoque\b")
+_STOCK_QUANTITY = re.compile(
+    r"\b(\d+(?:\.\d{3})*)\s*(?:unidades?|pecas?)\b|"
+    r"\bestoque\s*(?:de|:|=)\s*(\d+(?:\.\d{3})*)\b"
+)
+
+
+@dataclass(frozen=True)
+class _Stock:
+    name: str
+    available: bool
+    quantity: int | None
+
+
+def _stock_violation(
+    text: str, records: list[ToolCallRecord], documents: Iterable[str] = ()
+) -> bool:
+    """Validate explicit Portuguese stock claims against this turn's public tools.
+
+    Quantities require a stock_quantity field (search summaries alone cannot back them).
+    Named clauses bind to that product; unnamed claims need unambiguous single-product
+    evidence. This deliberately bounded lexical check is not general entailment.
+    """
+    facts: dict[str, _Stock] = {}
+    for record in records:
+        if record.status != "success" or record.tool_name not in CATALOG_TOOLS | {"check_stock"}:
+            continue
+        data = record.result_summary.get("data")
+        if isinstance(data, dict) and "items" in data:
+            data = data["items"]
+        for item in data if isinstance(data, list) else [data]:
+            if not isinstance(item, dict):
+                continue
+            name, available = item.get("name"), item.get("available")
+            if not isinstance(name, str) or not isinstance(available, bool):
+                continue
+            quantity = item.get("stock_quantity")
+            key = _fold(name).strip()
+            facts[key] = _Stock(key, available, quantity if type(quantity) is int else None)
+
+    policy_sentences = {
+        sentence.strip()
+        for document in documents
+        for sentence in _SENTENCE_SPLIT.split(_fold(document))
+    }
+    for sentence in _SENTENCE_SPLIT.split(_fold(text)):
+        # Split at product mentions so a valid quantity for B cannot justify a claim for A.
+        mentions = sorted(
+            (match.start(), match.end(), fact)
+            for fact in facts.values()
+            if fact.name
+            for match in re.finditer(re.escape(fact.name), sentence)
+        )
+        # A verbatim cited generic condition (e.g. "produtos esgotados durante a
+        # promoção") describes a policy, not the current stock of a specific product.
+        if (
+            not mentions
+            and not _STOCK_QUANTITY.search(sentence)
+            and re.sub(r"\[s\d+\]", "", sentence).strip() in policy_sentences
+            and re.search(r"\b(?:se|caso|durante|informar|sugerir|estejam|quando)\b", sentence)
+        ):
+            continue
+        clauses: list[tuple[str, list[_Stock]]] = []
+        if mentions:
+            clauses.append((sentence[: mentions[0][0]], list(facts.values())))
+            for index, (_, end, fact) in enumerate(mentions):
+                stop = mentions[index + 1][0] if index + 1 < len(mentions) else len(sentence)
+                clauses.append((sentence[end:stop], [fact]))
+        else:
+            clauses.append((sentence, list(facts.values())))
+        for clause, candidates in clauses:
+            if "?" in clause:
+                continue
+            negative = bool(_STOCK_NEGATIVE.search(clause))
+            positive = bool(_STOCK_POSITIVE.search(_STOCK_NEGATIVE.sub("", clause)))
+            quantities = [
+                int((match.group(1) or match.group(2)).replace(".", ""))
+                for match in _STOCK_QUANTITY.finditer(clause)
+            ]
+            if not (negative or positive or quantities):
+                continue
+            if len(candidates) != 1:
+                return True
+            fact = candidates[0]
+            if (positive and not fact.available) or (negative and fact.available):
+                return True
+            if any(quantity != fact.quantity for quantity in quantities):
+                return True
+    return False
+
+
 def output_violation(
     text: str,
     *,
@@ -302,6 +398,8 @@ def output_violation(
         return "price"
     if _commercial_claim_violation(text, records):
         return "commercial_claim"
+    if _stock_violation(text, records, documents):
+        return "stock"
     if not set(re.findall(r"\[(S\d+)\]", text)).issubset(labels):
         return "citation"
     folded = _fold(text)
@@ -335,6 +433,8 @@ def verified_lookup_tokens(records: Iterable[ToolCallRecord]) -> set[str]:
 
 def answer_uses_tool_facts(text: str, records: list[ToolCallRecord]) -> bool:
     """Tool grounding needs the answer to use a fact from a successful tool this turn."""
+    if _stock_violation(text, records):
+        return False
     folded = _fold(text)
     names = {product.name for product in _products(records)}
     for record in records:
