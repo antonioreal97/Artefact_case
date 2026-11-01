@@ -43,6 +43,9 @@ quality and materially cheaper after local infrastructure cost.
 - [ADR-002](adr/002-no-pii-external-egress.md): local privacy boundary decision.
 - [ADR-003](adr/003-sqlite-and-curated-policy-retrieval.md): data and retrieval decision.
 - [ADR-004](adr/004-explicit-orchestration.md): explicit state-machine orchestration decision.
+- [ADR-005](adr/005-multi-tenant-platform-branch.md): multi-tenant platform variant (`test-rag` branch).
+- [Development process and decision log](development-process.md): how the `test-rag` platform was
+  built, why each decision was taken, and open items.
 - [Seed cases](evals/cases.jsonl): initial executable-style acceptance cases.
 - [Case schema](evals/case.schema.json): contract for every evaluation case.
 - [Experiment matrix](evals/experiment-matrix.csv): variants to compare.
