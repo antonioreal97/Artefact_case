@@ -76,6 +76,9 @@ async def retrieve(
         parameters["categories"] = filters.categories
         expanding.append("categories")
     # Only constant SQL clauses are concatenated; all filter values are bound.
+    # FTS uses OR semantics over the query lexemes (plainto_tsquery with & -> |): full
+    # questions rarely share every lexeme with the answer chunk; ts_rank_cd still rewards
+    # chunks matching more lexemes, and the similarity gate below still applies.
     statement = text(
         """
         WITH eligible AS NOT MATERIALIZED (
@@ -99,11 +102,11 @@ async def retrieve(
             LIMIT :candidate_k
         ), text_hits AS (
             SELECT chunk_id, ts_rank_cd(search_vector,
-                       websearch_to_tsquery('portuguese', :query)) AS text_rank,
+                       replace(plainto_tsquery('portuguese', :query)::text, ' & ', ' | ')::tsquery) AS text_rank,
                    row_number() OVER (ORDER BY ts_rank_cd(search_vector,
-                       websearch_to_tsquery('portuguese', :query)) DESC, chunk_id) AS position
+                       replace(plainto_tsquery('portuguese', :query)::text, ' & ', ' | ')::tsquery) DESC, chunk_id) AS position
             FROM eligible
-            WHERE search_vector @@ websearch_to_tsquery('portuguese', :query)
+            WHERE search_vector @@ replace(plainto_tsquery('portuguese', :query)::text, ' & ', ' | ')::tsquery
             ORDER BY text_rank DESC, chunk_id
             LIMIT :candidate_k
         ), candidates AS (
