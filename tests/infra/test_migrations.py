@@ -33,7 +33,7 @@ async def test_initial_migration_matches_models(db_engine: AsyncEngine) -> None:
             "LLM_PROVIDER": "fake",
             "EMBEDDING_PROVIDER": "hash",
         }
-        for args in [("upgrade", "head"), ("check",)]:
+        for args in [("upgrade", "head"), ("downgrade", "-1"), ("upgrade", "head"), ("check",)]:
             process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-m",
@@ -45,6 +45,15 @@ async def test_initial_migration_matches_models(db_engine: AsyncEngine) -> None:
             )
             output, _ = await process.communicate()
             assert process.returncode == 0, output.decode()
+            print(f"alembic {' '.join(args)}: {output.decode().strip()}")
+            if args == ("downgrade", "-1"):
+                async with engine.connect() as conn:
+                    assert not await conn.scalar(
+                        text(
+                            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                            "WHERE table_name='agent_settings' AND column_name='welcome_message')"
+                        )
+                    )
             if args == ("check",):
                 assert b"No new upgrade operations detected" in output
         async with engine.connect() as conn:

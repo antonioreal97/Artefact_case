@@ -21,6 +21,7 @@ model/embedding validation has been completed. The second tenant is synthetic an
 
 | Document | Purpose |
 |---|---|
+| [Browser test interface](../README.md) (section “Interface de teste (navegador)”) | Local chat evaluation at `/chat`, gated with development docs; no frontend build or end-user authentication |
 | [ADR 005](adr/005-multi-tenant-platform-branch.md) | Branch stack and explicit deviations from the original architecture/token policy |
 | [ADR 006](adr/006-langchain-model-layer.md) | LangChain model/embedding adapters under the existing Agents SDK loop and privacy boundary; offline validation only |
 | [Platform contracts](platform/contracts.md) | Shared interfaces and module ownership |

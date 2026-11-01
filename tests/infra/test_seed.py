@@ -234,3 +234,24 @@ def test_duplicate_csv_key_rejected(tmp_path: Path, table: str) -> None:
         writer.writerows([*rows, rows[0]])
     with pytest.raises(ValueError, match="Duplicate key"):
         load_commerce(tmp_path)
+
+
+@pytest.mark.integration
+async def test_seed_welcome_defaults_and_preserves_operator_value(session, monkeypatch):
+    from scripts.create_tenant import WELCOME_MESSAGE
+
+    monkeypatch.setattr("scripts.create_tenant.TENANT_SLUG", f"welcome-{uuid.uuid4().hex}")
+    tenant, _ = await create_tenant(session)
+    await session.commit()
+    config = await session.get(AgentSettings, tenant)
+    assert config.welcome_message == WELCOME_MESSAGE
+    config.welcome_message = "Olá! Seja bem-vindo à nossa loja."
+    await session.commit()
+    await create_tenant(session)
+    assert config.welcome_message == "Olá! Seja bem-vindo à nossa loja."
+    for empty in (None, "", "   "):
+        config.welcome_message = empty
+        await session.commit()
+        await create_tenant(session)
+        assert config.welcome_message == WELCOME_MESSAGE
+        await session.commit()

@@ -143,6 +143,11 @@ def _render_turn(index: int, turn: DemoTurn, reply: ChatReply) -> str:
             "",
             f"**Cliente:** {turn.display or turn.text}",
             "",
+            *(
+                [f"**Agente (boas-vindas):**\n\n{reply.welcome_message}", ""]
+                if reply.welcome_message
+                else []
+            ),
             f"**Agente:**\n\n{reply.reply}",
             "",
             f"- Ferramentas: {', '.join(reply.tools_used) or 'nenhuma'}.",

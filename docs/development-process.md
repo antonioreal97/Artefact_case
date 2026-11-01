@@ -130,6 +130,8 @@ reason.
 | D-25 | 2026-11-01 | Distinguish lookup offers/contact requests from answer claims; ignore vault indices and allow configured persona phrases; prompt commerce-privacy-v5 hides internal contact/tool names | R5 live answers were rejected for capability lists, placeholder digits and introductions; unsupported stock, commercial values and unrelated numbers must still fail | R6 evidence and offline validation §4.7; live rerun remains coordinator-owned |
 | D-26 | 2026-11-01 | Normalize pt-BR singular/plural catalog queries, separate per-model and agent-loop deadlines, structurally classify stock assertions, and narrow tool/handoff prompt rules in commerce-privacy-v6 | R6 live runs exposed singular category misses, 30s aggregate turn failures, a scope-list stock false positive and unrelated conflicting_sources handoffs | R7 evidence and offline validation §4.8; live rerun remains coordinator-owned |
 | D-27 | 2026-11-01 | Give factory-built LangChain OpenAI models dedicated SDK-compatible HTTP clients and close only explicitly owned clients; leave shared Anthropic clients open; require fresh stock tools on follow-up questions in commerce-privacy-v7 | J1: the LangChain path introduced by L1 / PR #1 was broken after the first request, discovered by the first live LangChain run; J2: R7 follow-up availability answers used history without current-turn stock evidence | R8 regression evidence and validation §4.9; post-fix live OpenAI rerun remains coordinator-owned, Anthropic/Ollama unexecuted live |
+| D-28 | 2026-11-01 | Serve a vanilla HTML/CSS/JS chat test page from FastAPI at `/chat`, gated by `expose_api_docs`, with a page-scoped CSP and session-only API key | Local evaluation and demos need zero build steps/dependencies and same-origin API calls; the production gate avoids presenting a developer tool as an authenticated customer widget | U1; `tests/api/test_chat_ui.py`; README “Interface de teste (navegador)” |
+| D-29 | 2026-11-01 | Store an optional welcome per tenant and emit it once at first contact; greeting-only turns skip the provider, questions retain their normal answer | Strategic, consistent store onboarding without spending an LLM call on greetings; tenant ownership keeps brand, hours and tone configurable and preserves behavior for unconfigured tenants. Input safety/privacy run first; refusals, failures and handoffs omit the welcome | W1; `AgentSettings.welcome_message`; `tests/agent/test_welcome.py`; `tests/agent/test_chat.py`; `docs/platform/contracts.md` |
 
 ## 4. Open items and known limitations
 
@@ -733,6 +735,48 @@ or container stops were performed; all R4–R7 changes remain in place.
 | `uv run python -m scripts.eval_rag --json-out /tmp/r8-eval.json` | all hard gates PASS: tenant leakage 0, privacy violations 0/23, harness errors 0 |
 | Evaluation soft metrics | source_hit 12/12, citation_coverage 12/12, no_answer_safety 2/2, groundedness 19/19, tool_use 4/4, handoff_reason 2/2; all 100% |
 | `git diff --check` | clean |
+
+### 4.10 Browser chat test interface (U1, 2026-11-01)
+
+The vanilla static page at `/chat` uses the existing chat API and preserves its
+conversation ID across turns. The composer, question chips, key and reset button
+are disabled while a request is pending. A key change starts a new conversation;
+the key is stored only in sessionStorage. Responses and source metadata use DOM
+text nodes, with a strict CSP on the page and its two assets. The routes share the
+`expose_api_docs` gate; production has none of them. `/docs` keeps its existing
+headers and scripts. No frontend dependencies or build steps were introduced.
+
+All Python tests ran with `APP_ENV=test LLM_PROVIDER=fake EMBEDDING_PROVIDER=hash
+RUN_OPENAI_LIVE_TESTS=0`. The initial full run found that the existing documentation
+link checker treats a fragment as part of a filename; the new docs-index link was
+changed to the README with the section named beside it. The final run below passed.
+
+| Command / check | Measured result |
+|---|---|
+| `uv run ruff check .` | All checks passed |
+| `uv run ruff format --check .` | 169 files already formatted |
+| `uv run mypy app` | No issues in 65 source files |
+| `APP_ENV=test LLM_PROVIDER=fake EMBEDDING_PROVIDER=hash RUN_OPENAI_LIVE_TESTS=0 uv run pytest -q` | 859 passed, 125 subtests passed in 38.94s; no skips, warnings or xfails |
+| `node --check app/static/chat/app.js` | Exit 0 |
+| Temporary dependency-free Node VM smoke with a simulated DOM | Passed session storage, missing-key handling, single-flight lock, literal markup rendering, source/handoff details, both latency paths, conversation continuity/reset and 401/429/503/network recovery |
+| `docker build --target runtime -t emporio-platform:local .` | Exit 0 |
+| `docker run --rm emporio-platform:local ls app/static/chat` | `app.js`, `index.html`, `style.css` |
+| Curl against isolated fake/hash API on port 8047 | `/chat`: 200, text/html, CSP present; `/chat/app.js`: 200, text/javascript; `/chat/style.css`: 200, text/css |
+| Curl POST using the isolated seed's chat-scoped key | Takamine GD20: R$ 2.199,00; grounded true; search_products; 91 ms; second turn also 200 and retained the same conversation ID |
+| `git diff --check` | Clean |
+
+The isolated `u1-chat-ui` Compose project ran migration, seed and API against its
+own Postgres and Redis, then was removed with its volumes; the temporary credential
+file was deleted. Existing containers were not stopped. No real model calls or
+Git staging/commit/stash/reset/checkout were used.
+
+Limitations: the browser automation host was unavailable, so no visual browser
+inspection was completed; Node's simulated DOM is not a browser rendering test.
+The deterministic fake returned a generic catalog list for the stock follow-up,
+so that request proves conversation-ID continuity, not real-model context quality.
+The interface is local evaluation tooling without end-user authentication, history
+reload, streaming or cross-tab serialization. Reset clears the local view and ID,
+not server history; the API does not expose the active provider mode.
 
 ## 5. How to reproduce the evidence
 

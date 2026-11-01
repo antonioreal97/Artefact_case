@@ -66,6 +66,25 @@ Esse carregamento assume o formato sem aspas escrito pelo script. `SEED_API_KEY`
 é administrativa: mantenha-a no terminal/servidor confiável e fora do Git.
 Se a API não ficar saudável em 90 segundos, consulte `docker compose logs api`.
 
+### Interface de teste (navegador)
+
+Com a API e o seed prontos, abra `http://127.0.0.1:<API_PORT>/chat`
+(por padrão, `http://127.0.0.1:8000/chat`) e cole a chave no campo de acesso.
+O comando `export SEED_API_KEY=...` do início rápido carrega a chave de `.env`;
+prefira a `SEED_CHAT_API_KEY`, se provisionada no seed, carregando-a da mesma forma.
+Use a chave administrativa somente na máquina local. A interface mantém a chave
+apenas em `sessionStorage`, na sessão da aba; apague o campo para removê-la.
+
+Envie perguntas, continue a conversa ou clique em **Nova conversa**. Os detalhes
+de cada resposta mostram ferramentas, evidência (`grounded`), fontes, latência e
+eventual encaminhamento. Um turno é enviado por vez. Recarregar a página inicia
+uma nova conversa; **Nova conversa** limpa a tela, sem apagar o histórico no servidor.
+
+É uma interface de desenvolvimento e demonstração: segue `EXPOSE_API_DOCS` e
+retorna 404 em produção, inclusive nos assets. Não é um widget de produção e não
+oferece autenticação de usuário final. O provedor é o configurado na API; a página
+não detecta se é fake/hash ou um modelo real.
+
 ### Equivalente manual
 
 Para um ambiente novo, em Bash/WSL, execute os comandos abaixo. Se `.env` já
@@ -254,6 +273,9 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 Em outro terminal, disponibilize a **mesma** `SEED_API_KEY` gerada acima, sem
 imprimi-la em logs. A API de desenvolvimento expõe sua especificação em
 `http://127.0.0.1:8000/docs`; em produção a documentação é desativada.
+
+Para testar no navegador, abra `http://127.0.0.1:8000/chat` e siga a seção
+[Interface de teste (navegador)](#interface-de-teste-navegador).
 
 ```bash
 curl --fail-with-body --silent --show-error http://127.0.0.1:8000/health
@@ -522,6 +544,22 @@ de qualidade; Anthropic e Ollama não foram executados.
   `scripts.create_tenant` para incorporar contatos/endereço faltantes. IDs opacos de transporte e UUIDs em campos próprios receberam
   tratamento específico em R4; números em texto livre continuam sujeitos ao scanner.
 
+## Mensagem de boas-vindas
+
+Configure `agent_settings.welcome_message` por tenant no banco (texto opcional, até
+1.000 caracteres). O seed da Empório usa os horários do manual: segunda a sexta,
+9h–18h; sábado, 9h–13h; domingos e feriados, fechado. Reexecutar o seed preenche
+somente valores vazios e preserva o texto definido pelo operador.
+
+No primeiro contato da conversa, uma saudação isolada recebe apenas esse texto,
+sem chamada ao modelo. Se a mensagem já contém uma pergunta, o cliente recebe a
+boas-vindas e a resposta normal, sem precisar repetir a pergunta. A API devolve
+`welcome_message` antes de `reply` nesse segundo caso; WhatsApp e `/chat` exibem
+mensagens separadas. A boas-vindas fica no histórico e não se repete. Tenants sem
+texto configurado mantêm o comportamento anterior. Recusas, falhas e encaminhamentos
+não recebem boas-vindas; os controles de segurança e privacidade continuam ativos.
+Use apenas texto público da loja, sem dados pessoais ou placeholders de clientes.
+
 ## Uso de assistentes de código
 
 Usei **Claude Code (Anthropic)**, **Cursor**, **Hermes** e **OpenAI Codex** em sessões de agentes,
@@ -553,6 +591,8 @@ e propôs os commits. As ferramentas identificadas por frente são:
 | X2 — este README e alinhamento documental | OpenAI Codex |
 | D1 — execução completa em Docker | OpenAI Codex |
 | L1 — camada de modelos com LangChain | OpenAI Codex |
+| U1 — interface de teste no navegador | OpenAI Codex |
+| W1 — mensagem de boas-vindas | OpenAI Codex (implementação principal) e Cursor (revisão final, verificação e fechamento) |
 | R4–R8 — correções após as execuções com modelo real | Claude Code executou as baterias e diagnosticou as causas; OpenAI Codex implementou as correções |
 
 O fluxo foi: **contratos → frentes paralelas → revisão separada (R1) → testes

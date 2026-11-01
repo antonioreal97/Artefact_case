@@ -12,6 +12,10 @@ Dados do seed são fictícios. Entradas pessoais foram omitidas deste exemplo; s
 
 **Cliente:** Qual o status do meu pedido? [número informado; e-mail incorreto informado]
 
+**Agente (boas-vindas):**
+
+Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. Como posso ajudar?
+
 **Agente:**
 
 Não foi possível confirmar os dados do pedido. Verifique o número do pedido e o e-mail ou telefone usado na compra.

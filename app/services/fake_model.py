@@ -28,7 +28,7 @@ from agents.testing import ScriptedModel, assistant_message, function_call
 from agents.tool import Tool
 from openai.types.responses.response_prompt_param import ResponsePromptParam
 
-from app.agents.guardrails import NO_INFORMATION, check_input
+from app.agents.guardrails import NO_INFORMATION, check_input, is_greeting_only
 from app.services.privacy import fold_text
 
 
@@ -36,10 +36,6 @@ def _currency(value: object) -> str:
     return f"{Decimal(str(value)):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
 
 
-_GREETING = re.compile(
-    r"(?i)(?:oi|ol[aá]|bom dia|boa tarde|boa noite|obrigad[oa]|valeu|tchau)[\s!.,]*"
-    r"(?:tudo bem\??)?[\s!.]*"
-)
 _COMMERCE = re.compile(r"(?i)pre[cç]o|valor|custa|estoque|dispon[ií]ve(?:l|is)")
 # Service inquiries concern store policy, even when they name an instrument or price.
 _SERVICE = re.compile(
@@ -63,6 +59,12 @@ _RECOVERABLE = frozenset({"invalid_input", "not_authorized", "not_found"})
 
 def _catalog_arguments(text: str) -> dict[str, object]:
     """Small Portuguese filter grammar for the offline demo, not general NLU."""
+    # Keep a greeting prefix out of catalog matching without dropping request words.
+    words = text.split()
+    for end in range(len(words) - 1, 0, -1):
+        if is_greeting_only(" ".join(words[:end])):
+            text = " ".join(words[end:])
+            break
     arguments: dict[str, object] = {"in_stock_only": bool(_IN_STOCK.search(text))}
     maximum = _MAX_PRICE.search(text)
     if maximum:
@@ -136,7 +138,7 @@ class FakeCommerceModel(ScriptedModel):
                         "summary": "Solicitação de atendimento humano.",
                     },
                 )
-            if _GREETING.fullmatch(text.strip()):
+            if is_greeting_only(text):
                 return [assistant_message("Olá! Como posso ajudar?")]
             if not _SERVICE.search(text) and (
                 _COMMERCE.search(text) or (_PRODUCT.search(text) and not _POLICY.search(text))

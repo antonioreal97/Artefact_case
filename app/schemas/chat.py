@@ -27,6 +27,16 @@ class ChatReply(BaseModel):
     user_message_id: uuid.UUID
     message_id: uuid.UUID  # assistant message
     reply: str  # final text shown to the customer (tokens revealed, sources footer included)
+    # Render before reply. Greeting-only first contact instead puts the welcome in
+    # reply and leaves this null; later turns and tenants without a welcome use null.
+    welcome_message: str | None = Field(
+        default=None,
+        description=(
+            "Render before reply on first contact with a question. For a greeting-only "
+            "first contact, reply contains the welcome and this is null; tools_used is "
+            "empty, grounded is false and handoff is null. Null on later turns."
+        ),
+    )
     sources: list[SourceRef] = Field(default_factory=list)
     handoff: HandoffInfo | None = None
     grounded: bool  # True if every factual claim came from a tool result or cited source

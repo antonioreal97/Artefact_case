@@ -310,9 +310,15 @@ async def _process(
     )
     bind_conversation_id(reply.conversation_id)
     record_turn_metrics(reply, "whatsapp")
+    welcome_sent = True
+    if reply.welcome_message:
+        welcome_sent = await client.send_text(
+            phone_number_id=inbound.phone_number_id, to=inbound.wa_id, text=reply.welcome_message
+        )
     sent = await client.send_text(
         phone_number_id=inbound.phone_number_id, to=inbound.wa_id, text=reply.reply
     )
+    sent = sent and welcome_sent
     WHATSAPP_MESSAGES.inc(outcome="replied" if sent else "reply_not_sent")
     log.info("whatsapp.message_processed", message_id=str(reply.message_id), reply_sent=sent)
     return True
