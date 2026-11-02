@@ -383,7 +383,7 @@ inicialização em todos os ambientes.
 | RAG somente documental | Políticas, FAQ e manuais precisam de trechos e referências; o seed contém o PDF da loja. Embeddings não substituem verificações de identidade. |
 | Busca híbrida + RRF | pgvector/cosseno captura similaridade e full-text em português captura termos exatos; Reciprocal Rank Fusion combina posições, sem somar escalas incompatíveis. A superioridade sobre busca lexical não foi medida. |
 | Suficiência antes de responder | Limiar de similaridade e cobertura lexical retêm fontes insuficientes; consultas filtram tenant, documento ativo e versão atual no SQL. É uma heurística de relevância, não prova de resposta completa. |
-| Prompt versionado | `commerce-privacy-v5` combina persona configurável com regras obrigatórias; documentos chegam em `<untrusted_document>`, como dados não confiáveis. Guardrails e autorização continuam em código. |
+| Prompt versionado | `commerce-privacy-v7` combina persona configurável com regras obrigatórias; documentos chegam em `<untrusted_document>`, como dados não confiáveis. Guardrails e autorização continuam em código. |
 | CSVs validados + vault | Tipos, referências e unicidade são validados; importação usa upsert por tenant. Dados restritos ficam locais; spans reconhecidos viram tokens reversíveis, resolvidos por ferramentas locais. Isso é pseudonimização, não anonimização. |
 | Histórico persistido | Postgres guarda conversas, mensagens originais e redigidas, fontes e execução de ferramentas; apenas a forma redigida segue ao modelo. Redis guarda o vault com TTL móvel de 24 horas. |
 
@@ -410,6 +410,7 @@ e orquestração explícita ([ADR 003](docs/adr/003-sqlite-and-curated-policy-re
 [ADR 001](docs/adr/001-hybrid-provider-neutral-architecture.md) registra a estratégia
 original de provedores, ainda proposta. ADR 005 delimita a variante desta branch.
 Veja o [processo e decisões](docs/development-process.md) e o [índice](docs/README.md).
+Fluxos de atendimento: [docs/customer-service-flows.md](docs/customer-service-flows.md).
 
 ## Exemplos de interação
 
@@ -593,6 +594,7 @@ e propôs os commits. As ferramentas identificadas por frente são:
 | L1 — camada de modelos com LangChain | OpenAI Codex |
 | U1 — interface de teste no navegador | OpenAI Codex |
 | W1 — mensagem de boas-vindas | OpenAI Codex (implementação principal) e Cursor (revisão final, verificação e fechamento) |
+| F1 — documentação dos fluxos de atendimento | Cursor (Composer / worker Orca) |
 | R4–R8 — correções após as execuções com modelo real | Claude Code executou as baterias e diagnosticou as causas; OpenAI Codex implementou as correções |
 
 O fluxo foi: **contratos → frentes paralelas → revisão separada (R1) → testes
