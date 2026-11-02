@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
 import uuid
 from dataclasses import dataclass
@@ -33,6 +34,114 @@ from scripts.eval_rag import (
 )
 
 DEFAULT_OUTPUT_DIR = ROOT / "examples" / "conversations"
+
+# Exact fixture translations: unknown dialogue fails export instead of silently
+# publishing a missing/stale translation. Numeric catalog values stay verbatim.
+_TRANSLATIONS = {
+    "Quais opções de violões disponíveis custando até R$1000?": (
+        "Which acoustic guitars are available for up to R$1,000?"
+    ),
+    "Qual o preço do Yamaha C40?": ("What is the price of the Yamaha C40?"),
+    "Quanto custa o Takamine GD20?": ("How much does the Takamine GD20 cost?"),
+    "Takamine GD20 disponível em estoque?": ("Is the Takamine GD20 available in stock?"),
+    "Me arrependi da minha compra, posso devolver meu pedido?": (
+        "I changed my mind about my purchase; can I return my order?"
+    ),
+    "Quais as condições para devolução por arrependimento e a nota fiscal?": (
+        "What are the conditions for a change-of-mind return, including the invoice?"
+    ),
+    "Qual o status do meu pedido? [número informado; e-mail incorreto informado]": (
+        "What is my order status? [number provided; incorrect email provided]"
+    ),
+    "Vou corrigir o contato. [mesmo número informado; e-mail correto informado]": (
+        "I will correct the contact. [same number provided; correct email provided]"
+    ),
+    "Qual o endereço da loja?": ("What is the store address?"),
+    "Qual é a capital da Islândia?": ("What is the capital of Iceland?"),
+    (
+        "Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso "
+        "atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h "
+        "às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, "
+        "estoque, pedidos e nossas políticas. Como posso ajudar?"
+    ): (
+        "Hello! Welcome to Empório da Música — your music starts here! Our service "
+        "hours are Monday to Friday, 9 am to 6 pm, and Saturday, 9 am to 1 pm (closed "
+        "Sundays and holidays). I can help with instruments, prices, stock, orders and "
+        "our policies. How can I help?"
+    ),
+    "4.1 Direito de Arrependimento (Compras Online)": ("4.1 Right to Withdraw (Online Purchases)"),
+    (
+        "• O cliente pode solicitar a devolução em até 7 (sete) dias corridos após o recebimento do"
+    ): ("• The customer can request a return within 7 (seven) calendar days of receiving the"),
+    "produto, sem necessidade de justificativa.": ("product, without giving a reason."),
+    ("• O produto deve estar em sua embalagem original, sem sinais de uso, com todos os"): (
+        "• The product must be in its original packaging, with no signs of use, and include all"
+    ),
+    "acessórios e manuais.": ("accessories and manuals."),
+    ("• O reembolso será realizado na mesma forma de pagamento original em até 10 dias úteis."): (
+        "• The refund will use the original payment method within 10 business days."
+    ),
+    "• O frete de devolução é por conta da loja em caso de arrependimento.": (
+        "• The store pays return shipping for change-of-mind returns."
+    ),
+    "Fontes:": ("Sources:"),
+    "Políticas da Loja": ("Store Policies"),
+    (
+        "Não foi possível confirmar os dados do pedido. Verifique o número do pedido e "
+        "o e-mail ou telefone usado na compra."
+    ): (
+        "The order details could not be verified. Check the order number and the email "
+        "or phone number used for the purchase."
+    ),
+    "Situação: entregue.": ("Status: delivered."),
+    "1.2 Dados da Empresa": ("1.2 Company Details"),
+    "Campo Informação": ("Field Information"),
+    "Razão Social Empório da Música Instrumentos Musicais Ltda.": (
+        "Legal Name Empório da Música Instrumentos Musicais Ltda."
+    ),
+    "Nome Fantasia Empório da Música": ("Trading Name Empório da Música"),
+    "CNPJ 12.345.678/0001-90": ("Business Tax ID (CNPJ) 12.345.678/0001-90"),
+    "Endereço Rua 14 de Maio, 3200 — Centro, Campo Grande - MS, 79202-333": (
+        "Address Rua 14 de Maio, 3200 — Centro, Campo Grande - MS, 79202-333"
+    ),
+    "Telefone / WhatsApp (67) 3341-4444": ("Phone / WhatsApp (67) 3341-4444"),
+    "E-mail contato@empóriodamusica.com.br": ("Email contato@empóriodamusica.com.br"),
+    "Fundação 2008": ("Founded 2008"),
+    (
+        "Desculpe, posso ajudar apenas com assuntos da loja. Posso ajudar com "
+        "produtos, preços, estoque, pedidos e políticas da loja."
+    ): (
+        "Sorry, I can only help with store-related matters. I can help with products, "
+        "prices, stock, orders and store policies."
+    ),
+}
+
+
+def _translate(text: str) -> str:
+    if text in _TRANSLATIONS:
+        return _TRANSLATIONS[text]
+    if re.fullmatch(r"[\w -]+: R\$ [\d.,]+\.", text):
+        return text  # Product proper names and BRL prices need no translation.
+    if text.endswith(": disponível em estoque."):
+        return text.removesuffix(": disponível em estoque.") + ": available in stock."
+    for prefix, english in (
+        ("Rastreamento: ", "Tracking: "),
+        ("Previsão de entrega: ", "Estimated delivery: "),
+    ):
+        if text.startswith(prefix):
+            return english + text.removeprefix(prefix)
+    citation = re.fullmatch(r"(.*) (\[S\d+\])", text)
+    if citation:
+        return _translate(citation[1]) + " " + citation[2]
+    source = re.fullmatch(r"(\[S\d+\]) (.*) — §(.*), p\. (\d+)", text)
+    if source:
+        return f"{source[1]} {_translate(source[2])} — §{_translate(source[3])}, p. {source[4]}"
+    raise ValueError(f"Missing demo English translation: {text!r}")
+
+
+def _english(text: str) -> str:
+    lines = [_translate(line) if line else "" for line in text.splitlines()]
+    return "> EN: " + lines[0] + "".join("\n>" + (" " + line if line else "") for line in lines[1:])
 
 
 @dataclass(frozen=True)
@@ -72,36 +181,36 @@ async def _demos(factory: async_sessionmaker[AsyncSession], tenant_id: uuid.UUID
     order, email = row
     return [
         Demo(
-            "01-catalogo-violoes-ate-1000.md",
-            "Violões disponíveis até R$ 1.000",
+            "01-catalog-guitars-under-1000.md",
+            "Available acoustic guitars under R$ 1,000",
             (
                 DemoTurn("Quais opções de violões disponíveis custando até R$1000?"),
                 DemoTurn("Qual o preço do Yamaha C40?"),
             ),
         ),
         Demo(
-            "02-preco-takamine-gd20.md",
-            "Preço e estoque do Takamine GD20",
+            "02-price-takamine-gd20.md",
+            "Takamine GD20 price and stock",
             (
                 DemoTurn("Quanto custa o Takamine GD20?"),
                 DemoTurn("Takamine GD20 disponível em estoque?"),
             ),
         ),
         Demo(
-            "03-politica-devolucao.md",
-            "Arrependimento e condições de devolução",
+            "03-return-policy.md",
+            "Change-of-mind returns and conditions",
             (
                 DemoTurn("Me arrependi da minha compra, posso devolver meu pedido?"),
                 DemoTurn("Quais as condições para devolução por arrependimento e a nota fiscal?"),
             ),
-            "O modelo determinístico reformula a consulta: arrependi → arrependimento, "
-            "devolver → devolução. A pergunta original, sem reformulação, retorna "
-            "no_information com embeddings hash; essa limitação de retrieval permanece. "
-            "A resposta cita a seção recuperada, sem avaliar a elegibilidade individual.",
+            "The deterministic model rewrites the query: arrependi → arrependimento, "
+            "devolver → devolução. Without rewriting, the original question returns "
+            "no_information with hash embeddings; this retrieval limitation remains. "
+            "The reply cites the retrieved section without assessing individual eligibility.",
         ),
         Demo(
-            "04-status-pedido-verificado.md",
-            "Pedido: contato incorreto e verificação correta",
+            "04-verified-order-status.md",
+            "Order: incorrect contact and successful verification",
             (
                 DemoTurn(
                     f"Qual o status do pedido {order}? Email: incorreto@example.test",
@@ -112,18 +221,18 @@ async def _demos(factory: async_sessionmaker[AsyncSession], tenant_id: uuid.UUID
                     "Vou corrigir o contato. [mesmo número informado; e-mail correto informado]",
                 ),
             ),
-            "Dados do seed são fictícios. Entradas pessoais foram omitidas deste exemplo; "
-            "somente a resposta final ao cliente mostra os detalhes autorizados, "
-            "revelados localmente após verificação. Nenhum payload do modelo é exportado.",
+            "Seed data is fictitious. Personal inputs are omitted from this example; "
+            "only the final customer reply shows authorized details, revealed locally "
+            "after verification. No model payload is exported.",
         ),
         Demo(
-            "05-fora-do-escopo-e-endereco.md",
-            "Endereço da loja e pergunta fora do escopo",
+            "05-out-of-scope-and-address.md",
+            "Store address and an out-of-scope question",
             (
                 DemoTurn("Qual o endereço da loja?"),
                 DemoTurn("Qual é a capital da Islândia?"),
             ),
-            "O handoff registra uma solicitação; não comprova que um atendente foi notificado.",
+            "An unrelated question is refused without a human handoff or factual grounding.",
         ),
     ]
 
@@ -131,29 +240,39 @@ async def _demos(factory: async_sessionmaker[AsyncSession], tenant_id: uuid.UUID
 def _render_turn(index: int, turn: DemoTurn, reply: ChatReply) -> str:
     sources = (
         "; ".join(
-            f"[{source.label}] {source.title}, {source.section or 'sem seção'}, "
-            f"página {source.page}"
+            f"[{source.label}] {_translate(source.title)}, "
+            f"{_translate(source.section) if source.section else 'no section'}, page {source.page}"
             for source in reply.sources
         )
-        or "nenhuma"
+        or "none"
     )
+    customer = turn.display or turn.text
     return "\n".join(
         [
-            f"## Turno {index}",
+            f"## Turn {index}",
             "",
-            f"**Cliente:** {turn.display or turn.text}",
+            f"**Customer:** {customer}",
+            "",
+            _english(customer),
             "",
             *(
-                [f"**Agente (boas-vindas):**\n\n{reply.welcome_message}", ""]
+                [
+                    f"**Agent (welcome):**\n\n{reply.welcome_message}",
+                    "",
+                    _english(reply.welcome_message),
+                    "",
+                ]
                 if reply.welcome_message
                 else []
             ),
-            f"**Agente:**\n\n{reply.reply}",
+            f"**Agent:**\n\n{reply.reply}",
             "",
-            f"- Ferramentas: {', '.join(reply.tools_used) or 'nenhuma'}.",
-            f"- Citações: {sources}.",
-            f"- Handoff: {reply.handoff.reason if reply.handoff else 'nenhum'}.",
-            f"- grounded: {str(reply.grounded).lower()}.",
+            _english(reply.reply),
+            "",
+            f"- Tools: {', '.join(reply.tools_used) or 'none'}.",
+            f"- Citations: {sources}.",
+            f"- Handoff: {reply.handoff.reason if reply.handoff else 'none'}.",
+            f"- Grounded: {str(reply.grounded).lower()}.",
             "",
         ]
     )
@@ -207,13 +326,13 @@ async def generate_conversations(output_dir: Path = DEFAULT_OUTPUT_DIR) -> list[
                     lines = [
                         f"# {demo.title}",
                         "",
-                        "Modo: modelo fake determinístico + embeddings hash; não é um LLM real.",
-                        "Comando: `uv run python -m scripts.demo_conversations`",
-                        f"Data (UTC): {datetime.now(UTC).date().isoformat()}",
+                        "Mode: deterministic fake model + hash embeddings; not a real LLM.",
+                        "Command: `uv run python -m scripts.demo_conversations`",
+                        f"Date (UTC): {datetime.now(UTC).date().isoformat()}",
                         "",
-                        "Execução: ChatService real, catálogo CSV e políticas do seed Empório da "
-                        "Música, banco descartável; consultas ao snapshot local, "
-                        "não a um ERP ao vivo.",
+                        "Execution: real ChatService, CSV catalog and Empório da Música seed "
+                        "policies, disposable database; queries use the local snapshot, "
+                        "not a live ERP.",
                         "",
                     ]
                     if demo.note:

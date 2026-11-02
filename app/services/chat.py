@@ -30,6 +30,7 @@ from app.agents.guardrails import (
     discusses_sensitive_topic,
     has_factual_claim,
     is_greeting_only,
+    is_out_of_scope_refusal,
     output_violation,
     verified_lookup_tokens,
 )
@@ -487,7 +488,9 @@ class ChatService:
                 agent_settings.business_description or "",
                 tagline if isinstance(tagline, str) else "",
             )
-            if admits_no_information(answer) or has_factual_claim(answer, persona=persona):
+            if not is_out_of_scope_refusal(answer) and (
+                admits_no_information(answer) or has_factual_claim(answer, persona=persona)
+            ):
                 answer = NO_INFORMATION
                 await handoffs.request("no_information")
             # Otherwise: greeting/thanks/clarification question without factual claims.

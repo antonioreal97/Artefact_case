@@ -1,4 +1,4 @@
-# Emporio da Musica Agent Technical Design
+# Empório da Música Agent Technical Design
 
 ## Purpose and implementation status
 

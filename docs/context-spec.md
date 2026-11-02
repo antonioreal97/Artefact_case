@@ -16,7 +16,7 @@ source for store facts.
 ## Canonical business context
 
 - Business: Emporio da Musica, instrument store in Campo Grande/MS.
-- Tagline: "Sua musica comeca aqui."
+- Tagline: "Sua musica comeca aqui." ("Your music starts here.")
 - Store address: Rua 14 de Maio, 3200 - Centro, Campo Grande - MS, CEP 79202-333.
 - Main/store phone: `(67) 3341-4444`.
 - Remote WhatsApp: `(67) 3321-4500`.

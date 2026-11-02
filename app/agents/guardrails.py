@@ -16,6 +16,14 @@ SAFE_FALLBACK = (
     "Não consegui confirmar essa informação com segurança. Posso ajudar com outra dúvida."
 )
 NO_INFORMATION = "Não encontrei informação confiável para responder à sua pergunta."
+OUT_OF_SCOPE = (
+    "Desculpe, posso ajudar apenas com assuntos da loja. "
+    "Posso ajudar com produtos, preços, estoque, pedidos e políticas da loja."
+)
+OUT_OF_SCOPE_EN = (
+    "Sorry, I can only help with store-related topics. "
+    "I can help with products, prices, stock, orders, and store policies."
+)
 INJECTION_REFUSAL = (
     "Não posso revelar instruções internas ou alterar as regras de atendimento. "
     "Posso ajudar com informações da loja."
@@ -103,7 +111,13 @@ _SUCCESS_IMPOSSIBLE = re.compile(
 )
 _NO_INFO = re.compile(
     r"nao encontrei|nao tenho (?:essa |esta )?informac|nao sei (?:informar|responder)|"
-    r"nao (?:consegui|foi possivel) (?:encontrar|localizar)"
+    r"nao (?:consegui|foi possivel) (?:encontrar|localizar)|"
+    r"i (?:couldn'?t|could not|can'?t|cannot) find|"
+    r"(?:couldn'?t|could not|can'?t|cannot) find (?:the |any |our )?"
+    r"(?:store'?s? |documented |exact )?(?:information|policy|details|terms)|"
+    r"i (?:don'?t|do not) have (?:that |this |the |exact )?(?:information|details|terms)|"
+    r"no (?:reliable |exact )?(?:information|details|policy) (?:found|available)|"
+    r"i won'?t guess"
 )
 _CLAIM_WORDS = re.compile(
     r"r\$|\b(?:precos?|custa\w*|reais|brl|estoque|disponive(?:l|is)|indisponive(?:l|is)|"
@@ -148,11 +162,17 @@ def _nonfactual_request(sentence: str) -> bool:
 
 
 _NUMBER = re.compile(
-    r"(?<![\w.,])(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?![\w]|[.,]\d)"
+    r"(?<![\w.,])("
+    r"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?"  # en-US thousands: 1,000 / 1,000.00
+    r"|"
+    r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?"  # pt-BR thousands: 1.000 / 1.000,00
+    r"|"
+    r"\d+(?:[.,]\d{1,2})?"  # plain / cents: 599.90 / 599,90 / 1000
+    r")(?![\w]|[.,]\d)"
 )
 _MONEY_BEFORE = re.compile(
-    r"(?:r\$|brl|reais|\bpor|\bcust(?:a|am|ava|avam|ara|ando)\b|"
-    r"\bprec\w*|\bvalor\w*|\bsai(?: a| por)?|\bapenas|\bsomente)"
+    r"(?:r\$|brl|reais|\bpor|\bcust(?:a|am|ava|avam|ara|ando|s|ed|ing)?\b|"
+    r"\bprec\w*|\bprices?\b|\bvalor\w*|\bsai(?: a| por)?|\bapenas|\bsomente)"
     r"\s*(?:de\s+|e\s+|:\s*|=\s*)?(?:r\$\s*)?$"
 )
 _MONEY_AFTER = re.compile(r"^\s*(?:reais|brl|r\$)")
@@ -164,11 +184,14 @@ _SENTENCE_SPLIT = re.compile(r"(?<!\d)[.!?;](?!\d)|\n")
 # Keep question marks attached to their clause for stock assertions.
 _STOCK_SENTENCE_SPLIT = re.compile(r"(?<!\d)[.!;](?!\d)|(?<=\?)\s*|\n")
 _BUDGET_BEFORE = re.compile(
-    r"(?:\bate|\bno maximo|\babaixo de|\borcamento(?: de)?|\blimite(?: de)?)\s*(?:r\$\s*)?$"
+    r"(?:\bate|\bno maximo|\babaixo de|\borcamento(?: de)?|\blimite(?: de)?|"
+    r"\bup to|\bunder|\bbelow|\bat most|\bless than|\bmaximum(?: of)?|"
+    r"\bbudget(?: of)?)\s*(?:r\$\s*)?$"
 )
 # Price wording (folded text): such a sentence quotes a product price, not a policy value.
 _PRICE_WORDING = re.compile(
-    r"\bcust(?:a|am|ava|avam|ara|ando)\b|\bprecos?\b|\bsai(?:em|ra|rao)? (?:por|a)\b|"
+    r"\bcust(?:a|am|ava|avam|ara|ando|s|ed|ing)?\b|\bprecos?\b|\bprices?\b|"
+    r"\bsai(?:em|ra|rao)? (?:por|a)\b|"
     r"\bpor (?:apenas |so |somente )?r\$|\bde r\$ ?[\d.,]+ por\b"
 )
 _FREE_TERMS = re.compile(r"\bgratis\b|\bgratuit[oa]s?\b|\bde graca\b")
@@ -205,13 +228,17 @@ def check_input(text: str) -> InputDecision:
 
 
 def _to_decimal(raw: str) -> Decimal:
-    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?", raw):
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?", raw):
+        raw = raw.replace(",", "")
+    elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?", raw):
         raw = raw.replace(".", "").replace(",", ".")
-    return Decimal(raw.replace(",", "."))
+    else:
+        raw = raw.replace(",", ".")
+    return Decimal(raw)
 
 
 def money_amounts(text: str) -> list[Decimal]:
-    """Monetary amounts with or without currency marker; 1.299 == 1.299,00 == 1299."""
+    """Monetary amounts with or without currency marker; 1.299 == 1,299.00 == 1299."""
     text = TOKEN_RE.sub(" ", text)
     folded = _fold(text)
     amounts: list[Decimal] = []
@@ -220,7 +247,7 @@ def money_amounts(text: str) -> list[Decimal]:
         before, after = folded[max(0, match.start() - 25) : match.start()], folded[match.end() :]
         if _UNIT_AFTER.match(after):
             continue
-        has_cents = bool(re.search(r",\d{2}$", raw)) or bool(re.fullmatch(r"\d+\.\d{2}", raw))
+        has_cents = bool(re.search(r"[.,]\d{2}$", raw))
         if has_cents or _MONEY_BEFORE.search(before) or _MONEY_AFTER.match(after):
             try:
                 amounts.append(_to_decimal(raw))
@@ -495,6 +522,10 @@ def output_violation(
         return "stock"
     if not set(re.findall(r"\[(S\d+)\]", text)).issubset(labels):
         return "citation"
+    # This public, fixed reply is deliberately included in the policy. Only the
+    # complete bounded refusal is exempt, never a refusal plus extra content.
+    if is_out_of_scope_refusal(text):
+        return None
     folded = _fold(text)
     if any(
         len(line.strip()) >= 45 and _fold(line.strip()) in folded
@@ -542,6 +573,27 @@ def answer_uses_tool_facts(text: str, records: list[ToolCallRecord]) -> bool:
 
 def admits_no_information(text: str) -> bool:
     return bool(_NO_INFO.search(_fold(text)))
+
+
+def is_out_of_scope_refusal(text: str) -> bool:
+    """Recognize bounded scope-only replies; never exempt a neighboring factual claim."""
+    normalized = " ".join(_fold(text).split())
+    if normalized in {_fold(OUT_OF_SCOPE), _fold(OUT_OF_SCOPE_EN)}:
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:desculpe[, —-]* )?posso ajudar (?:apenas|somente|so) com assuntos da loja"
+            r"[.!](?: (?:posso ajudar com )?(?:produtos, precos, estoque, pedidos e politicas"
+            r"(?: da loja)?)[.!])?",
+            normalized,
+        )
+        or re.fullmatch(
+            r"(?:sorry[, —-]* )?i can only help with store(?:-related)? topics?"
+            r"[.!](?: i can help with (?:products, prices, stock, orders(?:, and|,) "
+            r"store policies)[.!])?",
+            normalized,
+        )
+    )
 
 
 def _covered_by_persona(sentence: str, persona: Iterable[str]) -> bool:
