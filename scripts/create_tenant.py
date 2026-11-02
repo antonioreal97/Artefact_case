@@ -26,6 +26,14 @@ from app.core.database import get_engine, get_sessionmaker
 from app.core.security import generate_api_key, hash_api_key
 from app.models import AgentSettings, ApiKey, Tenant, TenantChannel
 
+WELCOME_MESSAGE = (
+    "Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! "
+    "Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, "
+    "das 9h às 13h (domingos e feriados, fechado). "
+    "Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. "
+    "Como posso ajudar?"
+)
+
 TENANT_SLUG = "emporio-da-musica"
 SCOPES = ["chat", "knowledge:write", "knowledge:read", "handoffs", "conversations:read"]
 CHAT_SCOPES = ["chat"]
@@ -135,6 +143,7 @@ async def create_tenant(
                 tone_of_voice="Informal, profissional e acolhedor, em português brasileiro.",
                 default_language="pt-BR",
                 timezone="America/Campo_Grande",
+                welcome_message=WELCOME_MESSAGE,
                 handoff_message="Vou encaminhar você para nossa equipe. Sua música começa aqui.",
                 public_contact_values=PUBLIC_CONTACT_VALUES,
                 extra={"tagline": "Sua música começa aqui."},
@@ -143,6 +152,8 @@ async def create_tenant(
     else:
         # Existing seed tenants need newly documented public contacts too. Preserve
         # operator-added values and persona/model settings; never touch other tenants.
+        if not (config.welcome_message or "").strip():
+            config.welcome_message = WELCOME_MESSAGE
         config.public_contact_values = list(
             dict.fromkeys([*(config.public_contact_values or []), *PUBLIC_CONTACT_VALUES])
         )

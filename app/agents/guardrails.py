@@ -27,6 +27,20 @@ PRIVACY_NOTICE = (
 )
 HIDDEN_VALUE = "[dado oculto]"
 
+# Full-string grammar: punctuation/spacing are allowed, unknown words are not.
+_GREETING_ONLY = re.compile(
+    r"(?:oi|ola|bom dia|boa tarde|boa noite|e ai|tudo bem|tudo bom|como vai|"
+    r"obrigad[oa]|valeu|tchau)"
+    r"(?:[\s!.,?;:]+(?:oi|ola|bom dia|boa tarde|boa noite|e ai|tudo bem|tudo bom|"
+    r"como vai|obrigad[oa]|valeu|tchau))*[\s!.,?;:]*"
+)
+
+
+def is_greeting_only(text: str) -> bool:
+    """Conservatively recognize greetings/pleasantries, never discard a request."""
+    return _GREETING_ONLY.fullmatch(" ".join(fold_text(text).split())) is not None
+
+
 CATALOG_TOOLS = frozenset({"search_products", "get_product_details", "get_price"})
 _PRICE_KEYS = frozenset({"price", "promotional_price", "list_price", "effective_price"})
 

@@ -12,6 +12,10 @@ O handoff registra uma solicitação; não comprova que um atendente foi notific
 
 **Cliente:** Qual o endereço da loja?
 
+**Agente (boas-vindas):**
+
+Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. Como posso ajudar?
+
 **Agente:**
 
 1.2 Dados da Empresa

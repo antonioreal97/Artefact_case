@@ -211,3 +211,22 @@ async def test_meta_client_payload_and_unconfigured():
     assert unconfigured.configured is False
     assert await unconfigured.send_text(phone_number_id="1", to=WA_ID, text="x") is False
     await unconfigured.aclose()
+
+
+async def test_welcome_sent_before_answer(client, channel, fakes, monkeypatch):
+    original = fakes.chat.handle_message
+
+    async def with_welcome(*args, **kwargs):
+        reply = await original(*args, **kwargs)
+        return reply.model_copy(update={"welcome_message": "Olá! Bem-vindo(a)!"})
+
+    monkeypatch.setattr(fakes.chat, "handle_message", with_welcome)
+    body = json.dumps(_payload(channel, "wamid.welcome")).encode()
+    response = await client.post(URL, content=body, headers=_signed(body))
+    assert response.status_code == 200 and response.json()["processed"] == 1
+    assert [item["text"] for item in fakes.whatsapp.sent] == [
+        "Olá! Bem-vindo(a)!",
+        "Trocas em até 7 dias. [S1]",
+    ]
+    await client.post(URL, content=body, headers=_signed(body))
+    assert len(fakes.whatsapp.sent) == 2

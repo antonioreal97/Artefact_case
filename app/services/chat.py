@@ -13,7 +13,7 @@ from typing import cast
 import structlog
 from agents import ModelProvider, ModelSettings, RunConfig, Runner
 from agents.items import TResponseInputItem
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.customer_service import build_customer_service_agent
@@ -29,6 +29,7 @@ from app.agents.guardrails import (
     check_input,
     discusses_sensitive_topic,
     has_factual_claim,
+    is_greeting_only,
     output_violation,
     verified_lookup_tokens,
 )
@@ -276,6 +277,20 @@ class ChatService:
         session.add(user_message)
         # Tools use independent sessions, so the conversation FK must be committed first.
         await session.commit()
+        if agent_settings.welcome_message:
+            # Serialize first-contact decisions across API workers without locking the
+            # conversation row needed by independently committed handoff tools.
+            lock_key = int.from_bytes(conversation_id.bytes[:8], "big", signed=True)
+            await session.execute(select(func.pg_advisory_xact_lock(lock_key)))
+        first_contact = not await session.scalar(
+            select(Message.id)
+            .where(
+                Message.tenant_id == tenant_id,
+                Message.conversation_id == conversation_id,
+                Message.role == "assistant",
+            )
+            .limit(1)
+        )
         history = list(
             await session.scalars(
                 select(Message)
@@ -331,6 +346,27 @@ class ChatService:
             *public_persona_values(agent_settings.assistant_name, store_name or ""),
         ]
         decision = check_input(text)
+        welcome: str | None = None
+        welcome_only = False
+        configured_welcome = (agent_settings.welcome_message or "").strip()
+        if (
+            first_contact
+            and configured_welcome
+            and vault_ok
+            and not (decision.refusal or decision.reason or restricted)
+        ):
+            # Operator text skips factual/model-output checks, but is never allowed
+            # to contain customer PII or vault references (including on later turns).
+            try:
+                scan_outbound(
+                    configured_welcome,
+                    allowlist=scan_allowlist,
+                    known_restricted_values=known_values,
+                )
+                if not TOKEN_RE.search(configured_welcome):
+                    welcome = configured_welcome
+            except PrivacyBoundaryError:
+                pass
         answer = SAFE_FALLBACK
         failure_reason: str | None = None
         model_ran = False
@@ -346,6 +382,9 @@ class ChatService:
             answer = HANDOFF_ACK
         elif not vault_ok:
             failure_reason = "privacy_guard"
+        elif welcome and is_greeting_only(text):
+            answer = welcome
+            welcome_only = True
         else:
             try:
                 async with asyncio.timeout(self.settings.turn_timeout_seconds):
@@ -464,6 +503,7 @@ class ChatService:
             await self.vault_store.save(tenant_id, conversation_id, vault)
         except Exception:
             answer, selected, grounded = SAFE_FALLBACK, [], False
+            welcome, welcome_only = None, False
             await handoffs.request("privacy_guard")
         footer = format_sources_footer(selected)
         # Citation metadata is untrusted too; it must not smuggle vault-token reveals.
@@ -472,8 +512,12 @@ class ChatService:
             for m in TOKEN_RE.finditer(footer)
         ):
             answer, selected, grounded, footer = SAFE_FALLBACK, [], False, ""
+            welcome, welcome_only = None, False
             await handoffs.request("privacy_guard")
         handoff_this_turn = handoffs.turn_reason is not None and ctx.handoff_id is not None
+        if decision.refusal or handoff_this_turn or failure_reason:
+            welcome = None
+            welcome_only = False
         if handoff_this_turn:
             answer += "\nSolicitei atendimento humano para ajudar com sua solicitação."
             conversation.status = "handoff"
@@ -487,6 +531,19 @@ class ChatService:
         )
         revealed = vault.reveal(answer)
         latency = int((time.monotonic() - started) * 1000)
+        if welcome and not welcome_only:
+            session.add(
+                Message(
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=welcome,
+                    content_redacted=welcome,
+                    correlation_id=safe_correlation,
+                    meta={"kind": "welcome", "grounded": False, "handoff": False},
+                )
+            )
+            await session.flush()
         assistant = Message(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
@@ -495,6 +552,7 @@ class ChatService:
             content_redacted=answer,
             correlation_id=safe_correlation,
             meta={
+                **({"kind": "welcome"} if welcome_only else {}),
                 "grounded": grounded,
                 "handoff": handoff_this_turn,
                 "latency_ms": latency,
@@ -564,6 +622,7 @@ class ChatService:
             user_message_id=user_message.id,
             message_id=assistant.id,
             reply=revealed,
+            welcome_message=welcome if not welcome_only else None,
             sources=[SourceRef(**citation.model_dump()) for citation in selected],
             handoff=HandoffInfo(
                 handoff_id=ctx.handoff_id, reason=handoffs.turn_reason or "tool_failure"

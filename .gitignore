@@ -5,3 +5,6 @@ memory-bank/
 __pycache__/
 *.py[cod]
 tmp/
+
+# Cursor agent runtime state (local, not project source)
+.cursor/hooks/state/

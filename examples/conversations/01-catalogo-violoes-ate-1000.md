@@ -10,6 +10,10 @@ Execução: ChatService real, catálogo CSV e políticas do seed Empório da Mú
 
 **Cliente:** Quais opções de violões disponíveis custando até R$1000?
 
+**Agente (boas-vindas):**
+
+Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. Como posso ajudar?
+
 **Agente:**
 
 Yamaha C40 Nylon Natural: R$ 599,90.

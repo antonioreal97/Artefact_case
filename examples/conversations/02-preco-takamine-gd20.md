@@ -10,6 +10,10 @@ Execução: ChatService real, catálogo CSV e políticas do seed Empório da Mú
 
 **Cliente:** Quanto custa o Takamine GD20?
 
+**Agente (boas-vindas):**
+
+Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. Como posso ajudar?
+
 **Agente:**
 
 Takamine GD20 Dreadnought Natural: R$ 2.199,00.

@@ -32,6 +32,7 @@ async def test_demo_conversations(tmp_path: Path) -> None:
         assert content.count("**Cliente:**") == content.count("**Agente:**") == 2
         assert content.count("- Ferramentas:") == content.count("- Citações:") == 2
         assert content.count("- Handoff:") == 2
+        assert content.count("**Agente (boas-vindas):**") == 1
         assert "[[" not in content
         assert not re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{22}\b", content)
     catalog = contents["01-catalogo-violoes-ate-1000.md"].split("## Turno 2")[0]
