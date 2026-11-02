@@ -10,7 +10,7 @@ import pytest
 from agents.testing import ModelStep, ScriptedModel, assistant_message, function_call
 from sqlalchemy import select
 
-from app.agents.guardrails import SAFE_FALLBACK
+from app.agents.guardrails import NO_INFORMATION, OUT_OF_SCOPE, OUT_OF_SCOPE_EN, SAFE_FALLBACK
 from app.core.config import Settings
 from app.models import (
     AgentSettings,
@@ -246,12 +246,69 @@ async def test_direct_handoff_avoids_model(session_factory, session, commerce, t
     assert "Solicitei atendimento humano" in reply.reply
 
 
-async def test_unknown_question(session_factory, session, commerce):
+@pytest.mark.parametrize(
+    "question", ["Qual é a superfície de Marte?", "Qual é a capital da Islândia?"]
+)
+async def test_unrelated_question(session_factory, session, commerce, question):
     service, _ = make_service(session_factory)
-    reply = await turn(service, session, commerce, "Qual é a superfície de Marte?")
-    assert "Não encontrei" in reply.reply
+    reply = await turn(service, session, commerce, question)
+    assert reply.reply == OUT_OF_SCOPE
+    assert not reply.grounded and not reply.sources
+    assert reply.handoff is None
+    assert "request_human_handoff" not in reply.tools_used
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        OUT_OF_SCOPE,
+        OUT_OF_SCOPE_EN,
+        "Posso ajudar apenas com assuntos da loja. "
+        "Posso ajudar com produtos, preços, estoque, pedidos e políticas.",
+        "Posso ajudar apenas com assuntos da loja. Produtos, preços, estoque, pedidos e políticas.",
+        "Sorry, I can only help with store-related topics.",
+    ],
+)
+async def test_model_scope_refusal_survives_postprocessing(
+    session_factory, session, commerce, answer
+):
+    model = ScriptedModel([[assistant_message(answer)]])
+    service, _ = make_service(session_factory, model)
+    reply = await turn(service, session, commerce, "Qual é a capital da Islândia?")
+    assert model.calls
+    assert reply.reply == answer
+    assert not reply.grounded and not reply.sources and not reply.tools_used
+    assert reply.handoff is None
+
+
+async def test_unknown_store_question(session_factory, session, commerce):
+    service, _ = make_service(session_factory)
+    reply = await turn(service, session, commerce, "A loja tem estacionamento conveniado?")
+    assert reply.reply.startswith(NO_INFORMATION)
     assert not reply.grounded and not reply.sources
     assert reply.handoff.reason == "no_information"
+
+
+async def test_english_no_information_admission_triggers_handoff(
+    session_factory, session, commerce
+):
+    model = ScriptedModel(
+        [
+            [
+                assistant_message(
+                    "Sorry — I couldn't find the store's documented return policy, "
+                    "so I can't give exact terms."
+                )
+            ]
+        ]
+    )
+    service, _ = make_service(session_factory, model)
+    reply = await turn(
+        service, session, commerce, "What is your return policy if I change my mind?"
+    )
+    assert reply.reply.startswith(NO_INFORMATION)
+    assert reply.handoff.reason == "no_information"
+    assert not reply.grounded
 
 
 async def test_tool_failure(session_factory, session, commerce, monkeypatch):
@@ -689,7 +746,7 @@ async def test_m2_one_open_handoff_per_conversation(session_factory, session, co
     service, _ = make_service(session_factory)
     first = await turn(service, session, commerce, "quero falar com um atendente")
     ids = {first.handoff.handoff_id}
-    for text in ["quero falar com um atendente", "Qual é a superfície de Marte?"]:
+    for text in ["quero falar com um atendente", "A loja tem estacionamento conveniado?"]:
         reply = await turn(service, session, commerce, text, first.conversation_id)
         ids.add(reply.handoff.handoff_id)
     assert len(ids) == 1

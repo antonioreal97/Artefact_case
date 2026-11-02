@@ -28,7 +28,13 @@ from agents.testing import ScriptedModel, assistant_message, function_call
 from agents.tool import Tool
 from openai.types.responses.response_prompt_param import ResponsePromptParam
 
-from app.agents.guardrails import NO_INFORMATION, check_input, is_greeting_only
+from app.agents.guardrails import (
+    NO_INFORMATION,
+    OUT_OF_SCOPE,
+    OUT_OF_SCOPE_EN,
+    check_input,
+    is_greeting_only,
+)
 from app.services.privacy import fold_text
 
 
@@ -36,22 +42,49 @@ def _currency(value: object) -> str:
     return f"{Decimal(str(value)):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
 
 
-_COMMERCE = re.compile(r"(?i)pre[cç]o|valor|custa|estoque|dispon[ií]ve(?:l|is)")
+def _prefers_english(text: str) -> bool:
+    """Conservative offline cue only; not a general language detector."""
+    folded = fold_text(text)
+    en = bool(
+        re.search(
+            r"\b(?:what|which|how|where|when|why|please|sorry|capital|iceland|"
+            r"return|policy|order|status|guitar|stock|price|cost)\b",
+            folded,
+        )
+    )
+    pt = bool(
+        re.search(
+            r"\b(?:qual|quais|como|onde|quando|por\s*que|pedido|politica|"
+            r"devolucao|capital|islandia|violao|estoque|preco)\b",
+            folded,
+        )
+    )
+    return en and not pt
+
+
+_COMMERCE = re.compile(r"(?i)pre[cç]o|valor|custa|estoque|dispon[ií]ve(?:l|is)|price|cost|stock")
 # Service inquiries concern store policy, even when they name an instrument or price.
 _SERVICE = re.compile(
     r"(?i)\b(?:servi[cç]os?|manuten[cç][aã]o|consertos?|reparos?|"
     r"regulage(?:m|ns)|luthier(?:ia)?)\b"
 )
-_PRODUCT = re.compile(r"(?i)produto|viol(?:[aã]o|[oõ]es)|guitarra|piano|teclado")
-_IN_STOCK = re.compile(r"(?i)\bdispon[ií]ve(?:l|is)\b|\bem estoque\b")
+_PRODUCT = re.compile(r"(?i)produto|viol(?:[aã]o|[oõ]es)|guitarra|guitar|piano|teclado")
+_IN_STOCK = re.compile(r"(?i)\bdispon[ií]ve(?:l|is)\b|\bem estoque\b|\bin stock\b")
 _MAX_PRICE = re.compile(
-    r"(?i)\b(?:at[eé]|abaixo de|no m[aá]ximo)\s*(?:R\$\s*)?"
-    r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)"
+    r"(?i)\b(?:at[eé]|abaixo de|no m[aá]ximo|up to|under|below|at most)\s*(?:R\$\s*)?"
+    r"(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|"
+    r"\d+(?:[.,]\d{1,2})?)"
     r"(?:\s*reais)?"
 )
 _POLICY = re.compile(
     r"(?i)troca|devolu|defeito|garantia|desconto|pix|frete|prazo|entrega|parcel|pagamento|"
-    r"hor[aá]rio|pol[ií]tica|promo[cç]"
+    r"hor[aá]rio|pol[ií]tica|promo[cç]|return|refund|shipping|warranty|policy"
+)
+# Conservative offline routing only; this is not a general intent classifier.
+_STORE = re.compile(
+    r"\b(?:loja|voces|compra\w*|pedido\w*|catalogo|instrumento\w*|atendimento|"
+    r"endereco|contato|yamaha|takamine|tagima|cordas?|palhetas?|bateria\w*|ukulele|"
+    r"store|shop|product\w*|price\w*|stock|order\w*|return\w*|shipping|guitar\w*)\b"
 )
 # Recoverable errors whose fixed tool message asks the customer for corrected data.
 _RECOVERABLE = frozenset({"invalid_input", "not_authorized", "not_found"})
@@ -69,14 +102,18 @@ def _catalog_arguments(text: str) -> dict[str, object]:
     maximum = _MAX_PRICE.search(text)
     if maximum:
         raw = maximum.group(1)
-        if "," in raw or re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw):
+        if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?", raw):
+            raw = raw.replace(",", "")
+        elif "," in raw or re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw):
             raw = raw.replace(".", "").replace(",", ".")
         arguments["max_price"] = float(Decimal(raw))
     query = _MAX_PRICE.sub(" ", text)
     query = re.sub(r"(?i)\bviol[oõ]es\b", "violão", query)
+    query = re.sub(r"(?i)\bacoustic guitars?\b", "violão", query)
     query = re.sub(
         r"\b(?:qual|quais|op[cç][oõ]es|quanto|o|a|os|as|um|uma|do|da|de|tem|voc[eê]s|"
-        r"pre[cç]o|valor|custa(?:ndo)?|estoque|dispon[ií]ve(?:l|is)|produto|por|favor|em|[eé])\b",
+        r"pre[cç]o|valor|custa(?:ndo)?|estoque|dispon[ií]ve(?:l|is)|produto|por|favor|em|[eé]|"
+        r"which|what|how|much|many|do|you|have|for|the|in|stock|please|hi|hello)\b",
         " ",
         query,
         flags=re.IGNORECASE,
@@ -145,7 +182,14 @@ class FakeCommerceModel(ScriptedModel):
             ):
                 return self._call("search_products", _catalog_arguments(text))
             # Hash retrieval needs shared lexemes; normalize common return paraphrases.
-            query = re.sub(r"(?i)\barrependi\b", "arrependimento", text)
+            # The store manual is Portuguese — map English policy cues before retrieval.
+            query = text
+            if _prefers_english(text) and _POLICY.search(text):
+                query = (
+                    "política de devolução direito de arrependimento compra online "
+                    "trocas e devoluções"
+                )
+            query = re.sub(r"(?i)\barrependi\b", "arrependimento", query)
             query = re.sub(r"(?i)\bdevolver\b", "devolução", query)
             return self._call("search_knowledge", {"query": query, "category": None})
         if re.search(r"estoque|dispon[ií]vel", text, re.IGNORECASE):
@@ -238,7 +282,16 @@ class FakeCommerceModel(ScriptedModel):
                         parts.append(f"{label}: {value}")
             elif name == "request_human_handoff":
                 parts.append("Solicitei atendimento humano para ajudar com sua dúvida.")
-        return [assistant_message("\n".join(parts) if parts else NO_INFORMATION)]
+        store_related = any(
+            pattern.search(text) for pattern in (_COMMERCE, _SERVICE, _PRODUCT, _POLICY)
+        ) or bool(_STORE.search(fold_text(text)))
+        if parts:
+            return [assistant_message("\n".join(parts))]
+        if store_related:
+            fallback = NO_INFORMATION
+        else:
+            fallback = OUT_OF_SCOPE_EN if _prefers_english(text) else OUT_OF_SCOPE
+        return [assistant_message(fallback)]
 
     async def get_response(
         self,

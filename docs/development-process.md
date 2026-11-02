@@ -19,7 +19,7 @@ SDK, PostgreSQL + pgvector, Redis, Docker). ADR 005 records that trade-off. The 
 carried over without change is [ADR 002](adr/002-no-pii-external-egress.md) /
 [SECURITY.md](../SECURITY.md): **no raw personal data may reach the external model or the logs.**
 
-## 2. How the work was organised
+## 2. How the work was organized
 
 ### 2.1 Contracts first, then parallel workstreams
 
@@ -121,17 +121,19 @@ reason.
 | D-16 | 2026-11-01 | Amounts in retrieved documents may be quoted only as policy values (fees, thresholds, percentages, deadlines) in sentences that name no catalog product. Any amount next to a product must match this turn's catalog tool result | Two requirements pull in opposite directions. The evaluation needs policy amounts from the PDF (Pix discount, minimum installment, free-shipping threshold) to pass the guardrail. The adversarial suite showed that accepting every document amount lets a planted document set a product's price (FINDING-5). Splitting by "names a product or not" keeps both | E3 task; FINDING-5; eval cases `rag-pix-discount`, `rag-free-shipping` |
 | D-17 | 2026-11-01 | Chunks flagged as suspicious at ingestion are excluded from retrieval, and blanket commercial claims need backing from a catalog tool result | The suspicious-instruction flag was computed but never used. A document must not be able to make store-wide commercial promises (FINDING-4) | E3 task; FINDING-4 |
 | D-18 | 2026-11-01 | Retrieval is "sufficient" only when the best chunk reaches the similarity threshold, or when a lexical hit covers enough of the question. Lexical coverage lowers the similarity floor for that chunk. `search_knowledge` withholds insufficient sources from the model | Fixes the side effect of D-07 (O-1) without losing its recall gain. It also explains O-6: a correct chunk with strong term overlap but weak embedding similarity is kept, while an off-topic question with incidental term overlap is not | `app/rag/retrieval.py`, `tests/rag/test_retrieval_sufficiency.py` |
-| D-19 | 2026-11-01 | Disclose Claude Code, OpenAI Codex and their workflow in the root README, with explicit owner-confirmation placeholders where the tool record is missing | The case requires naming coding assistants and explaining their use; owner authorship of commits does not describe who generated the code | Case p.2; README “Uso de assistentes de código” |
+| D-19 | 2026-11-01 | Disclose coding assistants and their workflow in the root README, with explicit owner-confirmation placeholders where the tool record is missing | The case requires naming coding assistants and explaining their use; owner authorship of commits does not describe who generated the code | Case p.2; README “Uso de assistentes de código” (“Use of coding assistants”) |
 | D-20 | 2026-11-01 | Present multi-tenancy, generic uploads and WhatsApp as optional platform experiments; keep one seed-tenant/API walkthrough instead of rewriting before submission | R3 A-6 finds the breadth disproportionate to demonstrated case needs; clear scope and evidence have more value than a late rewrite | ADR 005; R3 §6; README |
-| D-21 | 2026-11-01 | Recommend a complete Docker run path, with an idempotent setup script, configurable loopback ports and a separate opt-in test image | Reproduce the whole application on the evaluator’s machine with only Docker/Compose; preserve the host Python/uv alternative and keep customer exports out of every image | Task D1; `scripts/docker_up.sh`; README “Executar com Docker”; Docker validation below |
+| D-21 | 2026-11-01 | Recommend a complete Docker run path, with an idempotent setup script, configurable loopback ports and a separate opt-in test image | Reproduce the whole application on the evaluator’s machine with only Docker/Compose; preserve the host Python/uv alternative and keep customer exports out of every image | Task D1; `scripts/docker_up.sh`; README “Executar com Docker” (“Run with Docker”); Docker validation below |
 | D-22 | 2026-11-01 | Use LangChain only for provider-neutral chat/embedding adapters beneath the Agents SDK loop and mandatory PrivacyGuardedModel; preserve tools, vault, guardrails and hybrid retrieval | Owner decision L1 restores model-provider choice from ADR 001 without a LangGraph/retrieval rewrite; explicit factories avoid the top-level langchain/LangGraph dependency, and unavoidable transitive LangSmith tracing is forbidden in every environment | [ADR 006](adr/006-langchain-model-layer.md); L1 validation §4.4; no live provider calls |
 | D-23 | 2026-11-01 | Fix first-live-run false positives using schema-aware transport scanning, current-turn budget echoes, unanimous generic stock evidence and question-aware stock checks; bump Portuguese policy to commerce-privacy-v3 | Native gpt-5-mini exposed failures hidden by fake output; preserve customer-text scanning and product-price grounding. Coordinator re-scoped F6 to applying general documented policies, after confirming strong vector matches already pass | R4 offline regressions and validation §4.5; live rerun remains coordinator-owned |
 | D-24 | 2026-11-01 | Repair catalog intent/partial matching, tenant public address/persona scanning and Custom-number price parsing; prompt commerce-privacy-v4 explains geography and partial agreement | Second native-model round still exposed query and lexical false positives; preserve tenant filters, private-data scans and grounded answer + handoff | R5 evidence and offline validation §4.6; live rerun remains coordinator-owned |
 | D-25 | 2026-11-01 | Distinguish lookup offers/contact requests from answer claims; ignore vault indices and allow configured persona phrases; prompt commerce-privacy-v5 hides internal contact/tool names | R5 live answers were rejected for capability lists, placeholder digits and introductions; unsupported stock, commercial values and unrelated numbers must still fail | R6 evidence and offline validation §4.7; live rerun remains coordinator-owned |
 | D-26 | 2026-11-01 | Normalize pt-BR singular/plural catalog queries, separate per-model and agent-loop deadlines, structurally classify stock assertions, and narrow tool/handoff prompt rules in commerce-privacy-v6 | R6 live runs exposed singular category misses, 30s aggregate turn failures, a scope-list stock false positive and unrelated conflicting_sources handoffs | R7 evidence and offline validation §4.8; live rerun remains coordinator-owned |
 | D-27 | 2026-11-01 | Give factory-built LangChain OpenAI models dedicated SDK-compatible HTTP clients and close only explicitly owned clients; leave shared Anthropic clients open; require fresh stock tools on follow-up questions in commerce-privacy-v7 | J1: the LangChain path introduced by L1 / PR #1 was broken after the first request, discovered by the first live LangChain run; J2: R7 follow-up availability answers used history without current-turn stock evidence | R8 regression evidence and validation §4.9; post-fix live OpenAI rerun remains coordinator-owned, Anthropic/Ollama unexecuted live |
-| D-28 | 2026-11-01 | Serve a vanilla HTML/CSS/JS chat test page from FastAPI at `/chat`, gated by `expose_api_docs`, with a page-scoped CSP and session-only API key | Local evaluation and demos need zero build steps/dependencies and same-origin API calls; the production gate avoids presenting a developer tool as an authenticated customer widget | U1; `tests/api/test_chat_ui.py`; README “Interface de teste (navegador)” |
+| D-28 | 2026-11-01 | Serve a vanilla HTML/CSS/JS chat test page from FastAPI at `/chat`, gated by `expose_api_docs`, with a page-scoped CSP and session-only API key | Local evaluation and demos need zero build steps/dependencies and same-origin API calls; the production gate avoids presenting a developer tool as an authenticated customer widget | U1; `tests/api/test_chat_ui.py`; README “Interface de teste (navegador)” (“Browser test interface”) |
 | D-29 | 2026-11-01 | Store an optional welcome per tenant and emit it once at first contact; greeting-only turns skip the provider, questions retain their normal answer | Strategic, consistent store onboarding without spending an LLM call on greetings; tenant ownership keeps brand, hours and tone configurable and preserves behavior for unconfigured tenants. Input safety/privacy run first; refusals, failures and handoffs omit the welcome | W1; `AgentSettings.welcome_message`; `tests/agent/test_welcome.py`; `tests/agent/test_chat.py`; `docs/platform/contracts.md` |
+| D-30 | 2026-11-02 | Separate scope refusals from missing store information: a shared public `OUT_OF_SCOPE` reply, a bounded whole-reply recognizer (`is_out_of_scope_refusal`) kept by `ChatService` without grounding or handoff, offline fake routing only when an empty result has no store-domain signal; policy `commerce-privacy-v8` prescribes the fixed pt-BR refusal | The policy already forbade handoffs for unrelated questions, but the offline model answered `NO_INFORMATION` after empty retrieval and the lexical factual-claim fallback could read a scope list as an unsupported answer; demo 05 and its test encoded the wrong handoff, and live runs showed wording-dependent failures on the World Cup question. A bounded grammar is auditable and cannot hide neighboring factual claims. Genuine store gaps keep `NO_INFORMATION` + `no_information`; the refusal stays Portuguese for English customers | `tests/agent/test_scope_refusal.py`; `tests/agent/test_chat.py`; `tests/test_demo_conversations.py`; `examples/conversations/05-out-of-scope-and-address.md`; `examples/conversations/live-en/` |
+| D-31 | 2026-11-02 | Make English-customer paths work without coaching: accept en-US money formats and English budget cues in price validation; recognize English no-information admissions; add `OUT_OF_SCOPE_EN` and require customer-language replies; instruct Portuguese `search_knowledge` queries against the Portuguese manual; forbid offering tool-less actions; bump policy to `commerce-privacy-v9` | Live English recordings under v8 failed a budget catalog turn on the `price` rule (`R$1,000` was invisible to `customer_amounts`, so budget echoes were treated as product prices), missed English “I couldn't find…” admissions, kept a Portuguese-only fixed scope refusal, needed coached Portuguese retrieval for returns, mixed languages, and offered reservation/contact updates with no tool. Fixes stay conservative: wrong English-format prices still fail; Portuguese regressions are covered offline; tenant welcome stays pt-BR | `tests/agent/test_english_customer_fixes.py`; `examples/conversations/live-en/`; R9 native 24/27 in `evals/live/2026-11-01-gpt-5-mini.md`; R9 #14 `privacy_guard` traced to the order lockout set off by the recordings' deliberate wrong contacts, re-run alone after expiry: verified answer |
 
 ## 4. Open items and known limitations
 
@@ -323,7 +325,7 @@ real-model quality. No open implementation questions remain for D1.
 
 ### 4.4 LangChain adapter validation (L1, 2026-11-01)
 
-Implemented by OpenAI Codex under D-22 / [ADR 006](adr/006-langchain-model-layer.md).
+Implemented under D-22 / [ADR 006](adr/006-langchain-model-layer.md).
 The coordinator explicitly revised the requested dependency plan after inspection:
 `langchain` would pull in LangGraph, so explicit factories replace `init_chat_model` /
 `init_embeddings`. Only four direct packages were added; `langsmith` is accepted solely
@@ -381,7 +383,7 @@ No implementation questions remain for L1, and no commit was created.
 
 The coordinator's first native OpenAI run with gpt-5-mini and text-embedding-3-small
 found useful-answer failures that fake/hash tests had not exposed. R4 was implemented
-by OpenAI Codex and tested only offline; no real provider was called by this worker.
+and tested only offline; no real provider was called by this worker.
 The coordinator owns the subsequent live rerun and its quality numbers.
 
 - F1: scanning projects out `id`, `call_id`, `encrypted_content` and `status` only
@@ -461,8 +463,8 @@ approximately 17 useful answers versus 8 previously; the case question worked in
 three phrasings. These are coordinator observations, not a new live measurement by
 this worker. Instrumented evidence identified the following remaining failures.
 
-- **G1:** all-term catalog matching returned zero for `Yamaha C40 estoque` and
-  `guitarra promoção`, although their product-only queries returned 1 and 5.
+- **G1:** all-term catalog matching returned zero for `Yamaha C40 estoque` (“Yamaha C40 stock”) and
+  `guitarra promoção` (“guitar promotion”), although their product-only queries returned 1 and 5.
   Search now ignores a small documented, accent-folded Portuguese commerce-intent
   vocabulary and tokenizes punctuation. Filtered all-term matches still win; if
   absent, partial matches require at least one meaningful term, rank by coverage
@@ -479,10 +481,10 @@ this worker. Instrumented evidence identified the following remaining failures.
   suffix still cannot turn a private e-mail into an allowlisted one. Public address
   answers pass the real ChatService path; customer addresses/CEPs still fail.
 - **G3:** persona spellings come from this tenant's configured assistant and store
-  names, including `Assistente virtual da/do ...`; both provider wrappers and the
+  names, including `Assistente virtual da/do ...` (“Virtual assistant of …”); both provider wrappers and the
   final-answer scan receive them. Standalone assistant-role introductions are not
   personal names. Tests cover model intermediate messages and final answers, names
-  after `sou o/a` or `me chamo`, unknown-store personas, and adjacent private text.
+  after `sou o/a` or `me chamo` (“I am” / “my name is”), unknown-store personas, and adjacent private text.
   No generic NAME-pattern exemption or customer-data allowlist was added.
 - **G4:** all five quoted guitar prices match the CSV seed: Telecaster 5400,
   PRS 6800, Ibanez 7500, Stratocaster 12500, Gibson 18900. The actual rejection was
@@ -493,8 +495,8 @@ this worker. Instrumented evidence identified the following remaining failures.
   price attached to the wrong named product, remain blocked. Apostrophes and
   Brazilian thousands separators were not the cause; O-10 remains open generally.
 - **G5:** `commerce-privacy-v4` explicitly applies the documented “outras cidades”
-  rule when a city is not listed as metropolitan, with carriers/prazos and exact
-  freight at checkout. For partially conflicting sources, answer the common fact
+  (“other cities”) rule when a city is not listed as metropolitan, with carriers/prazos
+  (lead times) and exact freight at checkout. For partially conflicting sources, answer the common fact
   (credit card, interest-free, up to 12 installments), cite both, identify only the
   disputed minimum-installment detail and offer human confirmation. ChatService
   already preserves a grounded answer plus `conflicting_sources`; a scripted
@@ -547,13 +549,13 @@ R5: run A had 17 useful answers plus two correct handoffs, and run B had 20 plus
 two. Installments now preserved the common answer with a `conflicting_sources`
 handoff. Instrumented runs isolated remaining answer-side false positives:
 
-- **H1:** the polite refusal to “Quem ganhou a copa de 2002?” listed capabilities
-  including “Buscar violões, teclados ou baterias disponíveis” and was rejected by
+- **H1:** the polite refusal to “Quem ganhou a copa de 2002?” (“Who won the 2002 World Cup?”) listed capabilities
+  including “Buscar violões, teclados ou baterias disponíveis” (“Search available guitars, keyboards or drum kits”) and was rejected by
   the stock rule without any tool call. A shared bounded lexical classifier now
   recognizes lookup offers, action-list entries and assistant scope descriptions;
   the no-source check uses it too, so fixing stock does not merely move the rejection.
   Explicit assertions, quantities and numeric commercial values still require
-  evidence, including “Temos 3 unidades do Yamaha C40 em estoque” with no tools.
+  evidence, including “Temos 3 unidades do Yamaha C40 em estoque” (“We have 3 units of the Yamaha C40 in stock”) with no tools.
 - **H2:** the correct contact request for order 2 contained `[[ORDER_1]]`; its
   numeric index triggered the ungrounded-claim fallback. Vault placeholders are
   removed before numeric claim detection. Contact requests, identity-confirmation
@@ -569,18 +571,18 @@ handoff. Instrumented runs isolated remaining answer-side false positives:
   as a discount or delivery duration. The tagline is also included in the model
   instructions; persona coverage does not set `grounded=true` or bypass stock,
   price, privacy or citation checks. The captured Campo Grande-MS greeting passes,
-  while “Olá! Hoje tudo com 20% de desconto.” still becomes `NO_INFORMATION`.
+  while “Olá! Hoje tudo com 20% de desconto.” (“Hi! Everything is 20% off today.”) still becomes `NO_INFORMATION`.
 
 R4/R5 pending changes were preserved. R6 adds 47 regression cases in
 `tests/agent/test_live_model_round_three.py`, including eight scripted ChatService
 cases with no model tool calls. The focused run of R4/R5/R6 and stock/grounding tests
 passed 278 tests. An initial focused run exposed the folded Portuguese conjunction
-“estoque e políticas” being mistaken for an assertion; the result pattern was
+“estoque e políticas” (“stock and policies”) being mistaken for an assertion; the result pattern was
 narrowed before final validation.
 The initial full run also exposed a prompt-copy false positive in two existing
 wrong-contact/demo tests: quoting the natural contact request created an eight-word
 policy overlap. The instruction now uses the shorter “e-mail/telefone da compra”
-example; a regression exercises the longer natural customer wording against the
+(“purchase email/phone”) example; a regression exercises the longer natural customer wording against the
 unchanged prompt-copy guard. The targeted follow-up passed all 50 tests.
 
 R6 changed files: `app/agents/guardrails.py`, `app/agents/instructions.py`,
@@ -619,8 +621,8 @@ The coordinator supplied two native gpt-5-mini runs after R6: run A produced
 23 useful answers plus one correct handoff out of 27, and run B produced 17 useful
 answers. These are pre-R7 observations; the coordinator owns the next live rerun.
 
-- **I1:** the seed query with category “violão” returned nothing while “violões”
-  returned ten available products up to R$1,000. Accent-folded token variants now
+- **I1:** the seed query with category “violão” (“guitar”, singular) returned nothing while “violões”
+  (plural) returned ten available products up to R$1,000. Accent-folded token variants now
   compare singular/plural forms in both categories and search terms (ões/ão,
   ães/ão, ais/al, eis/el, ns/m and s), preserving substring matching, tenant
   filtering, price/stock filters and exact-term preference. The exact live inputs
@@ -637,7 +639,7 @@ answers. These are pre-R7 observations; the coordinator owns the next live rerun
 - **I3:** the verbatim Copa refusal now passes both stock and no-source checks.
   With no catalog facts, stock predicates require an assertion verb, a quantity,
   a ready-delivery assertion or a terse product predicate such as “Yamaha C40
-  disponível”. Topic nouns and modifiers inside offers do not assert stock.
+  disponível” (“Yamaha C40 available”). Topic nouns and modifiers inside offers do not assert stock.
   Existing unsupported quantities and availability assertions remain rejected,
   as do contradictions against returned stock facts. Offer/scope syntax is shared
   with the no-source classifier so a successful refusal does not merely move to
@@ -700,7 +702,7 @@ the successful focused run (174 tests) and final validation below.
   needed for this defect.
 - **J2:** commerce-privacy-v7 explicitly requires check_stock or search_products
   in THIS turn when a customer asks availability of a previously mentioned
-  product ("E tem em estoque?"). History identifies the product but cannot supply
+  product ("E tem em estoque?" — “And is it in stock?”). History identifies the product but cannot supply
   stock evidence; quantities require check_stock. R7 guidance reusing prices and
   availability already obtained within the same turn remains intact.
 

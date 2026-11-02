@@ -24,13 +24,13 @@ Provider: deterministic HashEmbeddingProvider, 1536 dimensions; default relevanc
 The integration test ingests the real PDF into its throw-away PostgreSQL database and runs
 these questions through the production hybrid retrieval function.
 
-| PT-BR question | Top section | Page start | Cosine similarity |
+| PT-BR question (EN gloss) | Top section (store manual) | Page start | Cosine similarity |
 |---|---|---:|---:|
-| Quais são as formas de pagamento? | 3. Formas de Pagamento | 3 | 0.442 |
-| Quais são as regras de parcelamento? | 3.1 Regras de Parcelamento | 3 | 0.456 |
-| Como funciona a política de trocas e devoluções? | 4. Política de Trocas e Devoluções | 4 | 0.504 |
-| Qual é o prazo de entrega? | 5.2 Entregas para Outras Cidades | 4 | 0.234 |
-| Como funciona a garantia dos instrumentos? | 8. Garantia | 7 | 0.455 |
+| Quais são as formas de pagamento? ("What are the payment methods?") | 3. Formas de Pagamento | 3 | 0.442 |
+| Quais são as regras de parcelamento? ("What are the installment rules?") | 3.1 Regras de Parcelamento | 3 | 0.456 |
+| Como funciona a política de trocas e devoluções? ("How does the exchange and return policy work?") | 4. Política de Trocas e Devoluções | 4 | 0.504 |
+| Qual é o prazo de entrega? ("What is the delivery lead time?") | 5.2 Entregas para Outras Cidades | 4 | 0.234 |
+| Como funciona a garantia dos instrumentos? ("How does instrument warranty work?") | 8. Garantia | 7 | 0.455 |
 
 All five returned `sufficient=True`. The delivery hit qualifies via Portuguese FTS with
 cosine >= half the default threshold (0.15). Its section starts on page 4 and continues

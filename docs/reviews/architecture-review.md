@@ -95,10 +95,13 @@ Scope beyond the case: tenant/key management, generic PDF/DOCX/Markdown upload A
 ```text
 Tool result: check_stock(name='Yamaha C40', stock_quantity=0, available=False)
 Answer: Yamaha C40: disponível em estoque, com 99 unidades.
+  ("Yamaha C40: available in stock, with 99 units.")
 output_violation -> None; answer_uses_tool_facts -> True
 
 Document: Sábado 09:00 às 13:00. Domingo fechado.
+  ("Saturday 09:00 to 13:00. Sunday closed.")
 Answer: A loja abre domingo às 23h. [S1]
+  ("The store opens on Sunday at 11pm. [S1]")
 labels={'S1'}; output_violation -> None
 ```
 
@@ -131,7 +134,8 @@ The name is synthetic and absent from the supplied known-name set. The structura
 
 **Evidence:** Development log O-4 records no live run. `app/services/fake_model.py:61` implements keyword routing and tool-result rendering, reusing `check_input` and declining suspicious passages itself. The actual prompt is not interpreted. Eval `run_case` starts a fresh conversation (`scripts/eval_rag.py:475`); source-hit accepts a matching page or section (`:342`), citation coverage needs only one label (`:497`), and groundedness checks expected substrings plus flags (`:505`). D-13 makes only privacy/leakage/harness errors hard gates, also in live mode. `tests/eval/test_eval_harness.py:33` asserts these gates, not the quality metrics.
 
-A direct fake-router probe for `Quais opções de violões disponíveis custando até R$1000?` produced:
+A direct fake-router probe for `Quais opções de violões disponíveis custando até R$1000?`
+("What guitar options are available costing up to R$1000?") produced:
 
 ```json
 {"tool":"search_products","arguments":{"query":"Quais opções violões disponíveis custando até R 1000"}}

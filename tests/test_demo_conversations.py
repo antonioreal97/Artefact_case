@@ -13,11 +13,11 @@ from scripts.demo_conversations import generate_conversations
 pytestmark = pytest.mark.integration
 
 EXPECTED_FILES = {
-    "01-catalogo-violoes-ate-1000.md",
-    "02-preco-takamine-gd20.md",
-    "03-politica-devolucao.md",
-    "04-status-pedido-verificado.md",
-    "05-fora-do-escopo-e-endereco.md",
+    "01-catalog-guitars-under-1000.md",
+    "02-price-takamine-gd20.md",
+    "03-return-policy.md",
+    "04-verified-order-status.md",
+    "05-out-of-scope-and-address.md",
 }
 
 
@@ -26,18 +26,22 @@ async def test_demo_conversations(tmp_path: Path) -> None:
     assert {path.name for path in paths} == EXPECTED_FILES
     contents = {path.name: path.read_text() for path in paths}
     for content in contents.values():
-        assert "fake determinístico + embeddings hash; não é um LLM real" in content
+        assert "deterministic fake model + hash embeddings; not a real LLM" in content
         assert "uv run python -m scripts.demo_conversations" in content
-        assert "Data (UTC):" in content
-        assert content.count("**Cliente:**") == content.count("**Agente:**") == 2
-        assert content.count("- Ferramentas:") == content.count("- Citações:") == 2
+        assert "Date (UTC):" in content
+        assert content.count("**Customer:**") == content.count("**Agent:**") == 2
+        assert content.count("- Tools:") == content.count("- Citations:") == 2
         assert content.count("- Handoff:") == 2
-        assert content.count("**Agente (boas-vindas):**") == 1
+        assert content.count("**Agent (welcome):**") == 1
+        assert content.count("> EN:") == 5
+        # Each dialogue block must be followed by its English translation.
+        for block in re.split(r"\*\*(?:Customer|Agent(?: \(welcome\))?):\*\*", content)[1:]:
+            assert "> EN:" in block
         assert "[[" not in content
         assert not re.search(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{22}\b", content)
-    catalog = contents["01-catalogo-violoes-ate-1000.md"].split("## Turno 2")[0]
+    catalog = contents["01-catalog-guitars-under-1000.md"].split("## Turn 2")[0]
     assert "Quais opções de violões disponíveis custando até R$1000?" in catalog
-    product_lines = re.findall(r"^(.+): R\$ ([\d.,]+)\.$", catalog, re.MULTILINE)
+    product_lines = re.findall(r"^(?!>)(.+): R\$ ([\d.,]+)\.$", catalog, re.MULTILINE)
     assert product_lines == [
         ("Yamaha C40 Nylon Natural", "599,90"),
         ("Yamaha C70 Nylon Natural", "849,00"),
@@ -48,28 +52,30 @@ async def test_demo_conversations(tmp_path: Path) -> None:
     assert all(
         float(price.replace(".", "").replace(",", ".")) <= 1000 for _, price in product_lines
     )
-    price = contents["02-preco-takamine-gd20.md"]
+    price = contents["02-price-takamine-gd20.md"]
     assert "Takamine GD20 Dreadnought Natural: R$ 2.199,00." in price
     assert "disponível em estoque" in price and "check_stock" in price
-    policy = contents["03-politica-devolucao.md"]
-    for turn in policy.split("## Turno ")[1:]:
+    policy = contents["03-return-policy.md"]
+    for turn in policy.split("## Turn ")[1:]:
         assert "7 (sete) dias" in turn and "embalagem original" in turn
-        assert "[S" in turn and "- grounded: true" in turn
-    order = contents["04-status-pedido-verificado.md"]
-    first, second = order.split("## Turno 2")
+        assert "[S" in turn and "- Grounded: true" in turn
+    order = contents["04-verified-order-status.md"]
+    first, second = order.split("## Turn 2")
     assert "Não foi possível confirmar os dados do pedido" in first
     assert "BRAB1234567BR" not in first and "2025-10-25" not in first
     assert "Situação: entregue" in second
     assert "Rastreamento: BRAB1234567BR" in second
     assert "Previsão de entrega: 2025-10-25" in second
     assert "@" not in order and "pedido 1" not in order
-    address, refusal = contents["05-fora-do-escopo-e-endereco.md"].split("## Turno 2")
+    address, refusal = contents["05-out-of-scope-and-address.md"].split("## Turn 2")
     assert "Rua 14 de Maio, 3200" in address and "[S" in address
-    assert "Não encontrei informação confiável" in refusal and "Handoff: no_information" in refusal
+    assert "posso ajudar apenas com assuntos da loja" in refusal
+    assert "Handoff: none" in refusal and "Grounded: false" in refusal
+    assert "request_human_handoff" not in refusal
     again = await generate_conversations(tmp_path / "again")
 
     def without_date(value: str) -> str:
-        return re.sub(r"Data \(UTC\): .*", "", value)
+        return re.sub(r"Date \(UTC\): .*", "", value)
 
     assert {path.name: without_date(path.read_text()) for path in again} == {
         name: without_date(content) for name, content in contents.items()

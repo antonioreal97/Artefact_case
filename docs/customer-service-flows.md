@@ -1,51 +1,52 @@
-# Fluxos de atendimento do agente
+# Agent customer-service flows
 
-Documento derivado do código em execução (não de intenções de design). Destinado a
-recrutadores que avaliam o case e à equipe da loja. Quando README ou docs antigos
-divergem do código, **o código vence**; discrepâncias relevantes estão anotadas.
+This document is derived from running code, rather than design intentions. It is for
+recruiters evaluating the case and the store team. When the README or older docs
+differ from the code, **the code takes precedence**; relevant discrepancies are noted.
 
-Contrato de saída: `ChatReply` em `app/schemas/chat.py`. Orquestração:
-`ChatService.handle_message` em `app/services/chat.py`. Motivos de handoff:
-`HANDOFF_REASONS` em `app/models/handoff.py`.
+Output contract: `ChatReply` in `app/schemas/chat.py`. Orchestration:
+`ChatService.handle_message` in `app/services/chat.py`. Handoff reasons:
+`HANDOFF_REASONS` in `app/models/handoff.py`.
 
 ---
 
-## 1. Visão geral de um turno
+## 1. Turn overview
 
-Um turno começa no canal (API, WhatsApp ou UI `/chat`) e termina em um `ChatReply`
-persistido. Autenticação e rate limit ficam na borda HTTP; o resto é local e
-tenant-scoped.
+A turn starts at the channel (API, WhatsApp or `/chat` UI) and ends in a persisted
+`ChatReply`. Authentication and rate limiting sit at the HTTP boundary; everything
+else is local and tenant-scoped.
 
 ```mermaid
 flowchart TD
-  inbound["Mensagem inbound"] --> auth{"X-API-Key / canal"}
-  auth -->|"401/429"| reject["Rejeita na borda"]
+  inbound["Inbound message"] --> auth{"X-API-Key / channel"}
+  auth -->|"401/429"| reject["Reject at boundary"]
   auth --> rate{"Rate limit"}
-  rate -->|"excedido"| reject429["429 ou drop WA"]
-  rate --> conv["Lookup/cria Conversation"]
-  conv --> vault["Carrega vault Redis"]
+  rate -->|"exceeded"| reject429["429 or drop WA"]
+  rate --> conv["Look up/create Conversation"]
+  conv --> vault["Load Redis vault"]
   vault --> redact["redact_user_text + looks_restricted"]
-  redact --> persistUser["Persiste Message user"]
-  persistUser --> first["Calcula primeiro contato"]
+  redact --> persistUser["Persist user Message"]
+  persistUser --> first["Determine first contact"]
   first --> input{"check_input"}
-  input -->|"refusal"| inj["INJECTION_REFUSAL sem handoff"]
+  input -->|"refusal"| inj["INJECTION_REFUSAL without handoff"]
   input -->|"restricted"| priv["PRIVACY_NOTICE + privacy_guard"]
   input -->|"reason"| earlyH["HANDOFF_ACK + handoff"]
   input -->|"ok"| vaultOk{"vault_ok?"}
-  vaultOk -->|"não"| failPG["SAFE_FALLBACK + privacy_guard"]
+  vaultOk -->|"no"| failPG["SAFE_FALLBACK + privacy_guard"]
   vaultOk --> welcomeGate{"welcome + greeting-only?"}
-  welcomeGate -->|"sim"| welOnly["reply = welcome sem modelo"]
-  welcomeGate -->|"não"| agent["Runner + PrivacyGuardedModel"]
-  agent -->|"timeout/erro"| failTool["SAFE_FALLBACK + tool_failure/privacy_guard"]
+  welcomeGate -->|"yes"| welOnly["reply = welcome without model"]
+  welcomeGate -->|"no"| agent["Runner + PrivacyGuardedModel"]
+  agent -->|"timeout/error"| failTool["SAFE_FALLBACK + tool_failure/privacy_guard"]
   agent --> outVal{"output_violation"}
-  outVal -->|"violação"| failLow["SAFE_FALLBACK + low_confidence"]
-  outVal --> ansScan{"scan_outbound da resposta"}
-  ansScan -->|"dado restrito"| failPG
-  ansScan --> ground{"citação ou tool facts?"}
-  ground -->|"não + claim/no-info"| noInfo["NO_INFORMATION + no_information"]
+  outVal -->|"violation"| failLow["SAFE_FALLBACK + low_confidence"]
+  outVal --> ansScan{"scan_outbound on reply"}
+  ansScan -->|"restricted data"| failPG
+  ansScan --> ground{"citation or tool facts?"}
+  ground -->|"no + scope-only refusal"| scopeOk["OUT_OF_SCOPE kept — no handoff"]
+  ground -->|"no + claim/no-info"| noInfo["NO_INFORMATION + no_information"]
   ground -->|"ok"| sens{"discusses_sensitive_topic?"}
-  sens -->|"sim"| sensH["handoff sensitive_topic"]
-  sens -->|"não"| reveal["Reveal tokens autorizados"]
+  sens -->|"yes"| sensH["handoff sensitive_topic"]
+  sens -->|"no"| reveal["Reveal authorized tokens"]
   noInfo --> reveal
   sensH --> reveal
   failLow --> reveal
@@ -55,233 +56,245 @@ flowchart TD
   priv --> reveal
   inj --> reveal
   welOnly --> reveal
-  reveal --> persist["Persiste assistant + tools + ChatReply"]
+  reveal --> persist["Persist assistant + tools + ChatReply"]
 ```
 
-### Etapas e código
+### Steps and code
 
-| Etapa | O que acontece | Código |
+| Step | What happens | Code |
 |---|---|---|
-| Autenticação | `X-API-Key` → tenant; escopo `chat`. Tenant no body é ignorado. | `app/api/dependencies.py` `get_principal`, `require_scope` |
-| Rate limit | Contador Redis por chave (API) ou por `external_user_ref` (WhatsApp). Limiter down → permite (exceto lockout de pedido, fail-closed). | `count_hit`; `app/api/routes/chat.py` `post_message`; `app/api/webhooks/whatsapp.py` `_process` |
-| Conversação | Cria ou busca por `tenant_id` + `conversation_id` + `channel` + `external_user_ref`. | `ChatService._conversation` |
-| Tokenização | Spans conhecidos → `[[EMAIL_n]]` / `[[ORDER_n]]` etc. Residuais `looks_restricted` → placeholder e nunca vão ao modelo. | `redact_user_text`, `looks_restricted` (`app/services/privacy.py`) |
-| Input | Recusa de injeção; tópico sensível; pedido explícito de humano. | `check_input` (`app/agents/guardrails.py`) |
-| Boas-vindas | Primeiro contato (= sem assistant anterior); lock advisory; greeting-only sem modelo. | `handle_message` + `is_greeting_only` |
-| Loop do agente | `Runner.run` com `max_turns=MAX_AGENT_TURNS` (default 8), `TURN_TIMEOUT_SECONDS` (75) e `MODEL_TIMEOUT_SECONDS` (30) no `PrivacyGuardedModel`. | `handle_message`; `app/services/model_gateway.py` |
-| Egress | Cada payload ao provedor passa por `scan_outbound`; sem `store`/estado hospedado. | `PrivacyGuardedModel._check` |
-| Saída | Preço/estoque/promo/citações/prompt leak/success claims. | `output_violation` |
-| Ungrounded | Sem citação e sem fatos de tool, com claim factual ou admissão de “não sei” → `NO_INFORMATION` + `no_information`. | `has_factual_claim`, `admits_no_information` |
-| Reveal | Só tokens digitados neste turno ou `TRACKING`/`DATE` de `lookup_order` com `identity_verified`. | `verified_lookup_tokens`, `vault.reveal` |
-| Persistência | Mensagens, `MessageSource`, `ToolExecution`, `AuditEvent`, status `handoff` se aplicável. | fim de `handle_message` |
+| Authentication | `X-API-Key` → tenant; `chat` scope. A tenant in the body is ignored. | `app/api/dependencies.py` `get_principal`, `require_scope` |
+| Rate limit | Redis counter per key (API) or `external_user_ref` (WhatsApp). Limiter down → allow (except order lockout, which fails closed). | `count_hit`; `app/api/routes/chat.py` `post_message`; `app/api/webhooks/whatsapp.py` `_process` |
+| Conversation | Create or look up by `tenant_id` + `conversation_id` + `channel` + `external_user_ref`. | `ChatService._conversation` |
+| Tokenization | Known spans → `[[EMAIL_n]]` / `[[ORDER_n]]`, etc. Residual `looks_restricted` content → placeholder and never sent to the model. | `redact_user_text`, `looks_restricted` (`app/services/privacy.py`) |
+| Input | Injection refusal; sensitive topic; explicit request for a human. | `check_input` (`app/agents/guardrails.py`) |
+| Welcome | First contact (= no previous assistant message); advisory lock; greeting-only without a model. | `handle_message` + `is_greeting_only` |
+| Agent loop | `Runner.run` with `max_turns=MAX_AGENT_TURNS` (default 8), `TURN_TIMEOUT_SECONDS` (75) and `MODEL_TIMEOUT_SECONDS` (30) in `PrivacyGuardedModel`. | `handle_message`; `app/services/model_gateway.py` |
+| Egress | Every provider payload passes through `scan_outbound`; no `store`/hosted state. | `PrivacyGuardedModel._check` |
+| Output | Price/stock/promotion/citations/prompt leaks/success claims. | `output_violation` |
+| Ungrounded | No citation or tool facts, with a factual claim or admission of missing information (Portuguese or common English forms) → `NO_INFORMATION` + `no_information`. Exception: a complete, bounded scope-only refusal (`OUT_OF_SCOPE` / `OUT_OF_SCOPE_EN` or a harmless variant) is kept, ungrounded, without handoff. | `is_out_of_scope_refusal`, `has_factual_claim`, `admits_no_information` |
+| Reveal | Only tokens entered in this turn or `TRACKING`/`DATE` from `lookup_order` with `identity_verified`. | `verified_lookup_tokens`, `vault.reveal` |
+| Persistence | Messages, `MessageSource`, `ToolExecution`, `AuditEvent`, `handoff` status if applicable. | End of `handle_message` |
 
-Mensagens fixas (`SAFE_FALLBACK`, `NO_INFORMATION`, `INJECTION_REFUSAL`, `HANDOFF_ACK`,
-`PRIVACY_NOTICE`) estão em `app/agents/guardrails.py`. Em handoff deste turno a
-resposta ganha o sufixo *“Solicitei atendimento humano…”* (`handle_message`).
+Fixed messages (`SAFE_FALLBACK`, `NO_INFORMATION`, `OUT_OF_SCOPE`, `OUT_OF_SCOPE_EN`,
+`INJECTION_REFUSAL`, `HANDOFF_ACK`, `PRIVACY_NOTICE`) are in `app/agents/guardrails.py`.
+A handoff in the current turn adds the suffix *“Solicitei atendimento humano…”*
+(“I requested human assistance…”) to the reply (`handle_message`).
 
-**Discrepância:** o README ainda cita a política `commerce-privacy-v5`; o código usa
-`PROMPT_VERSION = "commerce-privacy-v7"` em `app/agents/instructions.py`.
+**Resolved discrepancy:** an earlier README cited `commerce-privacy-v5`; the README
+and code now both use `commerce-privacy-v9` (`PROMPT_VERSION` in `app/agents/instructions.py`).
 
 ---
 
-## 2. Fluxos por intenção
+## 2. Flows by intent
 
-O modelo escolhe ferramentas; a política em `POLICY_TEXT` (`build_instructions`) e os
-guardrails determinísticos fecham o comportamento. Tools: `build_customer_service_agent`
+The model selects tools; the policy in `POLICY_TEXT` (`build_instructions`) and
+deterministic guardrails constrain behavior. Tools: `build_customer_service_agent`
 (`app/agents/customer_service.py`).
 
-### 2a. Catálogo, preço e promoções
+### 2a. Catalog, prices and promotions
 
 ```mermaid
 flowchart TD
-  q["Pergunta de produto/preço"] --> sp["search_products"]
-  sp --> filter{"min/max_price / categoria / estoque?"}
+  q["Product/price question"] --> sp["search_products"]
+  sp --> filter{"min/max_price / category / stock?"}
   filter --> items["ProductSummary + promo"]
-  items --> detail{"detalhe ou preço pontual?"}
-  detail -->|"sim"| gd["get_product_details / get_price"]
-  detail -->|"não"| answer["Resposta com nomes/preços deste turno"]
+  items --> detail{"detail or specific price?"}
+  detail -->|"yes"| gd["get_product_details / get_price"]
+  detail -->|"no"| answer["Answer with names/prices from this turn"]
   gd --> answer
   answer --> ov["output_violation: price + commercial_claim"]
   ov -->|"ok"| ok["ChatReply grounded via tool facts"]
-  ov -->|"falha"| sf["SAFE_FALLBACK + low_confidence"]
+  ov -->|"failure"| sf["SAFE_FALLBACK + low_confidence"]
 ```
 
 - **Tools:** `catalog.search_products`, `get_product_details`, `get_price`
-  (`app/tools/catalog.py`). Orçamento → `min_price`/`max_price`; matches parciais
-  vêm do backend local (sem garantia de equivalência ao produto pedido — ver
-  limitações do README).
-- **Promoção:** `active_promotion` no resultado; claims “grátis/desconto” sem backing
-  de catálogo neste turno violam `_commercial_claim_violation`.
-- **Validação:** preços de produto só de tools deste turno, nunca de documentos RAG
+  (`app/tools/catalog.py`). Budget → `min_price`/`max_price`; partial matches come
+  from the local backend (no guarantee of equivalence to the requested product;
+  see the README limitations).
+- **Promotion:** `active_promotion` in the result; “grátis/desconto” (“free/discount”)
+  claims without catalog backing in this turn violate `_commercial_claim_violation`.
+- **Validation:** product prices come only from this turn's tools, never RAG documents
   (`_price_violation`).
-- **Instruções:** buscar primeiro com `search_products`; não inventar preço; não
-  mostrar `product_id` ao cliente (`POLICY_TEXT`).
+- **Instructions:** search first with `search_products`; do not invent prices or
+  show `product_id` to the customer (`POLICY_TEXT`).
 
-### 2b. Estoque
+### 2b. Stock
 
 ```mermaid
 flowchart TD
-  q["Disponibilidade / quantidade"] --> id["Identifica product_id via catálogo"]
-  id --> cs["check_stock neste turno"]
+  q["Availability / quantity"] --> id["Identify product_id through catalog"]
+  id --> cs["check_stock in this turn"]
   cs --> facts["StockInfo: available + stock_quantity"]
-  facts --> ans["Resposta alinhada aos fatos"]
+  facts --> ans["Answer consistent with facts"]
   ans --> sv["_stock_violation"]
   sv -->|"ok"| ok["tool-grounded"]
-  sv -->|"claim sem fato / inconsistente"| rej["low_confidence"]
+  sv -->|"unsupported / inconsistent claim"| rej["low_confidence"]
 ```
 
 - **Tool:** `inventory.check_stock` (`app/tools/inventory.py`).
-- Histórico só identifica o produto; disponibilidade de turnos anteriores **não** é
-  evidência (`POLICY_TEXT`). Follow-ups (“e tem em estoque?”) devem chamar a tool de
-  novo neste turno.
-- Quantidades exigem `stock_quantity` (resumo de busca sozinho não respalda número).
-- Perguntas (sentenças com `?`) e ofertas não assertivas passam pelo checker
+- History only identifies the product; availability from previous turns is **not**
+  evidence (`POLICY_TEXT`). Follow-ups (“e tem em estoque?” / “and is it in stock?”)
+  must call the tool again in this turn.
+- Quantities require `stock_quantity` (a search summary alone does not support a number).
+- Questions (sentences with `?`) and non-assertive offers pass the checker
   (`_stock_violation`, `_nonfactual_request`).
 
-### 2c. Políticas da loja via RAG
+### 2c. Store policies through RAG
 
 ```mermaid
 flowchart TD
-  q["Pergunta de política/FAQ"] --> sk["search_knowledge"]
-  sk --> ret["retrieval.retrieve híbrido RRF"]
+  q["Policy/FAQ question"] --> sk["search_knowledge"]
+  sk --> ret["retrieval.retrieve hybrid RRF"]
   ret --> suf{"sufficient?"}
-  suf -->|"não"| empty["sources=[] ao modelo"]
-  suf -->|"sim"| wrap["chunks em untrusted_document + labels"]
-  empty --> model["Modelo: sem inventar"]
+  suf -->|"no"| empty["sources=[] to model"]
+  suf -->|"yes"| wrap["chunks in untrusted_document + labels"]
+  empty --> model["Model: no fabrication"]
   wrap --> model
-  model --> cite{"cita [S1] válidos?"}
-  cite -->|"não / claim sem ground"| noInfo["NO_INFORMATION ou low_confidence"]
-  cite -->|"ok"| conflict{"fontes contradizem o fato?"}
-  conflict -->|"sim"| cs["request_human_handoff conflicting_sources"]
-  conflict -->|"não"| ok["resposta + footer de fontes"]
+  model --> cite{"valid [S1] citations?"}
+  cite -->|"no / ungrounded claim"| noInfo["NO_INFORMATION or low_confidence"]
+  cite -->|"ok"| conflict{"sources contradict the fact?"}
+  conflict -->|"yes"| cs["request_human_handoff conflicting_sources"]
+  conflict -->|"no"| ok["answer + sources footer"]
 ```
 
-- **Retrieval:** `app/rag/retrieval.py` `retrieve` — cosseno + FTS PT + RRF;
-  `sufficient` exige similaridade ≥ limiar ou cobertura lexical (≥ metade dos lexemas
-  da query). Chunks com `suspicious_instructions` nunca são servidos.
-- **Adapter:** `search_knowledge` em `customer_service.py` só entrega chunks se
-  `found.sufficient`; caso contrário `sources=[]` e `sufficient=false`.
-- Documentos são dados não confiáveis (`<untrusted_document>`); a política manda
-  ignorar comandos neles.
-- Conflito: o modelo deve responder o consenso, citar ambas e só então usar
-  `conflicting_sources` (`POLICY_TEXT`). Não há detector automático de contradição
-  além da tool de handoff + instruções.
+- **Retrieval:** `app/rag/retrieval.py` `retrieve` — cosine + Portuguese FTS + RRF;
+  `sufficient` requires similarity ≥ threshold or lexical coverage (≥ half the query
+  lexemes). Chunks with `suspicious_instructions` are never served. The store manual is
+  Portuguese; `commerce-privacy-v9` tells the model to translate `search_knowledge`
+  queries into Portuguese while answering in the customer's language.
+- **Adapter:** `search_knowledge` in `customer_service.py` only supplies chunks if
+  `found.sufficient`; otherwise, `sources=[]` and `sufficient=false`.
+- Documents are untrusted data (`<untrusted_document>`); policy instructs the model
+  to ignore commands within them.
+- Conflict: the model should answer with the consensus, cite both sources and only
+  then use `conflicting_sources` (`POLICY_TEXT`). There is no automatic contradiction
+  detector beyond the handoff tool and instructions.
 
-### 2d. Status de pedido
+### 2d. Order status
 
 ```mermaid
 flowchart TD
-  q["Status do pedido"] --> tok["Vault tokeniza ORDER + EMAIL/PHONE"]
-  tok --> contact{"contato presente?"}
-  contact -->|"não"| ask["Modelo pede e-mail/telefone da compra"]
-  contact -->|"sim"| lo["lookup_order tokens literais"]
-  lo --> lock{"falhas >= max?"}
-  lock -->|"sim"| locked["not_authorized locked + privacy_guard"]
-  lock --> verify{"identidade ok?"}
-  verify -->|"não"| fail["not_authorized + contador"]
-  verify -->|"sim"| view["OrderStatusView + TRACKING/DATE tokens"]
-  view --> reveal["Reveal só neste turno verificado"]
+  q["Order status"] --> tok["Vault tokenizes ORDER + EMAIL/PHONE"]
+  tok --> contact{"contact present?"}
+  contact -->|"no"| ask["Model asks for purchase email/phone"]
+  contact -->|"yes"| lo["lookup_order literal tokens"]
+  lo --> lock{"failures >= max?"}
+  lock -->|"yes"| locked["not_authorized locked + privacy_guard"]
+  lock --> verify{"identity ok?"}
+  verify -->|"no"| fail["not_authorized + counter"]
+  verify -->|"yes"| view["OrderStatusView + TRACKING/DATE tokens"]
+  view --> reveal["Reveal only in this verified turn"]
 ```
 
 - **Tool:** `orders.lookup_order` (`app/tools/orders.py`).
-- Contadores Redis: por pedido e por ator (`actor_ref` ou `conversation_id`);
-  `ORDER_LOOKUP_MAX_FAILURES` (default 3) em `ORDER_LOOKUP_LOCKOUT_SECONDS` (3600).
-  Limiter indisponível → `unavailable` (fail-closed).
-- Sucesso não zera contadores. Pedido inexistente e contato errado → mesma falha
-  (`MSG_NOT_AUTHORIZED`) para não enumerar.
+- Redis counters: per order and per actor (`actor_ref` or `conversation_id`);
+  `ORDER_LOOKUP_MAX_FAILURES` (default 3) within `ORDER_LOOKUP_LOCKOUT_SECONDS` (3600).
+  Unavailable limiter → `unavailable` (fail closed).
+- Success does not reset counters. Missing order and wrong contact → the same
+  failure (`MSG_NOT_AUTHORIZED`) to prevent enumeration.
 - `handle_message`: `result_summary.locked is True` → `failure_reason = privacy_guard`
-  → `SAFE_FALLBACK` + handoff. Tokens `TRACKING`/`DATE` sem verificação neste turno
-  também forçam `privacy_guard`.
+  → `SAFE_FALLBACK` + handoff. `TRACKING`/`DATE` tokens without verification in this
+  turn also force `privacy_guard`.
 
-### 2e. Atendimento humano
+### 2e. Human handoff
 
 ```mermaid
 flowchart TD
-  trig["Gatilho"] --> paths
+  trig["Trigger"] --> paths
   paths --> a["check_input: customer_request / sensitive_topic"]
-  paths --> b["Modelo chama request_human_handoff"]
-  paths --> c["Pós-modelo: failure / no_info / sensitive answer"]
+  paths --> b["Model calls request_human_handoff"]
+  paths --> c["After model: failure / no_info / sensitive answer"]
   a --> persist["HandoffRequest open + conversation.status=handoff"]
   b --> persist
   c --> persist
-  persist --> cust["Cliente vê ACK/fallback + sufixo de encaminhamento"]
-  persist --> note["Sem notificação real a humano"]
+  persist --> cust["Customer sees ACK/fallback + handoff suffix"]
+  persist --> note["No actual human notification"]
 ```
 
-- **Tool:** `handoff.request_human_handoff` (`app/tools/handoff.py`) — idempotente se
-  já há `ctx.handoff_id`; grava `HandoffRequest`, audit `handoff.created`.
-- O que o cliente vê depende do caminho (tabela na §3). Não há e-mail/Slack/push:
-  só registro local consultável pela API de handoffs.
-- Pedido explícito de humano / reclamação / pagamento / exceção comercial podem
-  ser capturados **antes** do modelo (`check_input`) ou depois
-  (`discusses_sensitive_topic` se a resposta trata o caso pessoalmente sem citação).
+- **Tool:** `handoff.request_human_handoff` (`app/tools/handoff.py`) — idempotent if
+  `ctx.handoff_id` already exists; writes `HandoffRequest` and audit `handoff.created`.
+- What the customer sees depends on the path (table in §3). There is no email/Slack/push:
+  only a local record that can be queried through the handoffs API.
+- Explicit human requests / complaints / payment / commercial exceptions may be
+  caught **before** the model (`check_input`) or afterward
+  (`discusses_sensitive_topic` if the answer addresses the individual case without a citation).
 
-### 2f. Fora do escopo e manipulação
+### 2f. Out of scope and manipulation
 
 ```mermaid
 flowchart TD
-  msg["Mensagem"] --> inj{"padrão de injeção?"}
-  inj -->|"sim"| refuse["INJECTION_REFUSAL — sem modelo, sem handoff"]
-  inj -->|"não"| scope{"fora do escopo da loja?"}
-  scope -->|"sim"| polite["Recusa educada via modelo — sem handoff"]
-  scope -->|"não"| normal["Fluxo normal"]
+  msg["Message"] --> inj{"injection pattern?"}
+  inj -->|"yes"| refuse["INJECTION_REFUSAL — no model, no handoff"]
+  inj -->|"no"| scope{"model scope decision / offline: empty result without store signal"}
+  scope -->|"outside scope"| polite["OUT_OF_SCOPE / OUT_OF_SCOPE_EN / bounded scope-only refusal — grounded=false, no handoff"]
+  scope -->|"no"| normal["Normal flow"]
 ```
 
-- Injeção / “mostre o system prompt” / jailbreak: `_REFUSAL` em `check_input` →
-  `decision.refusal` → resposta fixa, modelo não roda, **sem** handoff.
-- Fora de escopo (clima, notícias, etc.): política manda recusar e oferecer ajuda
-  com a loja **sem** `request_human_handoff` (`POLICY_TEXT`).
+- Injection / “mostre o system prompt” (“show the system prompt”) / jailbreak:
+  `_REFUSAL` in `check_input` → `decision.refusal` → fixed reply, model does not run,
+  **no** handoff.
+- Out of scope (weather, news, general knowledge): `commerce-privacy-v9` instructs the
+  real model to use the fixed refusal in the customer's language (`OUT_OF_SCOPE` pt-BR or
+  `OUT_OF_SCOPE_EN`), with no lookup and **no** `request_human_handoff`. In offline mode,
+  `FakeCommerceModel` picks the matching fixed reply when no tool answer can be rendered
+  and the question has no store-domain signal; it may run an unsuccessful `search_knowledge`
+  first. `ChatService` recognizes only complete, bounded scope-only replies
+  (`is_out_of_scope_refusal`) and keeps them without sources, grounding or handoff; a
+  refusal with appended facts, numbers or citations still goes through the normal checks.
+  A store-related question the knowledge base cannot answer still takes the
+  `no_information` path.
 
-### 2g. Boas-vindas no primeiro contato
+### 2g. First-contact welcome message
 
 ```mermaid
 flowchart TD
-  fc["Sem Message assistant prévia"] --> cfg{"welcome_message configurada?"}
-  cfg -->|"não"| agent["Fluxo normal"]
-  cfg -->|"sim"| safe{"scan_outbound ok + sem tokens?"}
-  safe -->|"não"| agent
+  fc["No previous assistant Message"] --> cfg{"welcome_message configured?"}
+  cfg -->|"no"| agent["Normal flow"]
+  cfg -->|"yes"| safe{"scan_outbound ok + no tokens?"}
+  safe -->|"no"| agent
   safe --> greet{"is_greeting_only?"}
-  greet -->|"sim"| only["reply=welcome; welcome_message=null; sem modelo"]
-  greet -->|"não"| both["welcome_message + reply do agente"]
-  both --> ch{"canal"}
-  ch -->|"API"| field["Campo separado no JSON"]
-  ch -->|"WhatsApp /chat"| two["Duas mensagens / bolhas"]
+  greet -->|"yes"| only["reply=welcome; welcome_message=null; no model"]
+  greet -->|"no"| both["welcome_message + agent reply"]
+  both --> ch{"channel"}
+  ch -->|"API"| field["Separate JSON field"]
+  ch -->|"WhatsApp /chat"| two["Two messages / bubbles"]
 ```
 
-- Implementação: `handle_message` + contrato W1 em `docs/platform/contracts.md`.
-- Recusa, falha e handoff deste turno **cancelam** a boas-vindas
+- Implementation: `handle_message` + W1 contract in `docs/platform/contracts.md`.
+- Refusal, failure and handoff in this turn **cancel** the welcome message
   (`welcome = None`).
 
 ---
 
-## 3. Tabela de motivos de handoff
+## 3. Handoff reasons
 
-Valores de `HANDOFF_REASONS` (`app/models/handoff.py`). Em todo handoff deste turno o
-cliente também recebe o sufixo de encaminhamento (exceto se a criação da
-`HandoffRequest` falhar por completo — nesse caso não há `handoff` no `ChatReply`).
+Values of `HANDOFF_REASONS` (`app/models/handoff.py`). Every handoff in the current
+turn also adds the handoff suffix to the customer reply (unless `HandoffRequest`
+creation fails completely, in which case `ChatReply` has no `handoff`).
 
-| Motivo | Quando (caminho no código) | Mensagem típica ao cliente | Modelo rodou? |
+| Reason | When (code path) | Typical customer message | Did the model run? |
 |---|---|---|---|
-| `customer_request` | `check_input` → `_HUMAN`; ou tool `request_human_handoff` com esse reason | Pré-modelo: `HANDOFF_ACK`. Via tool: texto do modelo (se válido) + sufixo | Só se via tool após o loop |
-| `sensitive_topic` | `check_input` → `_SENSITIVE`; ou `discusses_sensitive_topic` pós-resposta; ou tool | Pré-modelo: `HANDOFF_ACK`. Pós-modelo: resposta (se mantida) + sufixo | Pré: não. Pós/tool: sim |
-| `privacy_guard` | Texto ainda `looks_restricted`; vault save falhou; `PrivacyBoundaryError`; lockout de pedido (`locked`); token TRACKING/DATE não autorizado; footer com token indevido | `PRIVACY_NOTICE` (input restrito) ou `SAFE_FALLBACK` (demais) + sufixo | Input restrito: não. Outros: pode ter rodado antes do fail-closed |
-| `tool_failure` | Exceção no `Runner` (timeout, MaxTurns, erro genérico); tool com `unavailable`/`internal_error` | `SAFE_FALLBACK` + sufixo | Tentou; falhou |
-| `low_confidence` | `output_violation` (price/stock/commercial_claim/citation/prompt_leak/success_claim) | `SAFE_FALLBACK` + sufixo | Sim (resposta descartada) |
-| `no_information` | Modelo rodou, sem citação nem tool-grounding, e `admits_no_information` ou `has_factual_claim` | `NO_INFORMATION` + sufixo | Sim |
-| `conflicting_sources` | Modelo chama `request_human_handoff` com esse reason (política RAG) | Resposta útil de consenso (se o modelo cumprir) + sufixo | Sim |
+| `customer_request` | `check_input` → `_HUMAN`; or `request_human_handoff` tool with this reason | Before model: `HANDOFF_ACK`. Through tool: model text (if valid) + suffix | Only through the tool after the loop |
+| `sensitive_topic` | `check_input` → `_SENSITIVE`; or `discusses_sensitive_topic` after the reply; or tool | Before model: `HANDOFF_ACK`. After model: reply (if retained) + suffix | Before: no. After/tool: yes |
+| `privacy_guard` | Text still `looks_restricted`; vault save failed; `PrivacyBoundaryError`; order lockout (`locked`); unauthorized TRACKING/DATE token; footer with an improper token | `PRIVACY_NOTICE` (restricted input) or `SAFE_FALLBACK` (other cases) + suffix | Restricted input: no. Others: may have run before failing closed |
+| `tool_failure` | `Runner` exception (timeout, MaxTurns, generic error); tool with `unavailable`/`internal_error` | `SAFE_FALLBACK` + suffix | Attempted; failed |
+| `low_confidence` | `output_violation` (price/stock/commercial_claim/citation/prompt_leak/success_claim) | `SAFE_FALLBACK` + suffix | Yes (reply discarded) |
+| `no_information` | Model ran, without citation or tool grounding, the answer is not a recognized scope-only refusal, and `admits_no_information` or `has_factual_claim` | `NO_INFORMATION` + suffix | Yes |
+| `conflicting_sources` | Model calls `request_human_handoff` with this reason (RAG policy) | Useful consensus answer (if the model complies) + suffix | Yes |
 
-Observações:
+Notes:
 
-- `_Handoffs.request` garante no máximo um `HandoffRequest` aberto por conversa;
-  reutiliza o existente.
-- Motivos inválidos na tool → `invalid_input` (`MSG_INVALID_REASON`), sem criar
-  registro.
+- `_Handoffs.request` ensures at most one open `HandoffRequest` per conversation;
+  it reuses an existing request.
+- Invalid tool reasons → `invalid_input` (`MSG_INVALID_REASON`), without creating
+  a record.
 
 ---
 
-## 4. Canais
+## 4. Channels
 
-Todos convergem em `ChatService.handle_message`.
+All converge on `ChatService.handle_message`.
 
 ```mermaid
 flowchart LR
@@ -289,46 +302,46 @@ flowchart LR
   wa["POST /v1/webhooks/whatsapp"] --> cs
   ui["GET /chat → JS fetch API"] --> api
   cs --> reply["ChatReply"]
-  reply --> apiOut["JSON único"]
-  reply --> waOut["send_text welcome opcional + reply"]
-  reply --> uiOut["Bolhas separadas se welcome_message"]
+  reply --> apiOut["Single JSON response"]
+  reply --> waOut["send_text optional welcome + reply"]
+  reply --> uiOut["Separate bubbles if welcome_message"]
 ```
 
-| Canal | Entrada | Auth / identidade | Diferenças |
+| Channel | Input | Auth / identity | Differences |
 |---|---|---|---|
-| API | `ChatMessageRequest.message` | `X-API-Key` + scope `chat`; sem `external_user_ref` | Rate por API key; 404 se conversa de outro tenant |
-| WhatsApp | Webhook Meta assinado; só `type=text` | Tenant via `TenantChannel.phone_number_id`; `external_user_ref = HMAC(wa_id)` | Dedupe Redis; welcome como **mensagem separada**; rate por usuário; sempre 200 após assinatura ok |
-| UI `/chat` | Estáticos em `app/static/chat/`; só com docs de desenvolvimento | Mesma API com chave colada no browser | Dev only (`chat_ui.py`); sem auth de usuário final |
+| API | `ChatMessageRequest.message` | `X-API-Key` + `chat` scope; no `external_user_ref` | Rate per API key; 404 for another tenant's conversation |
+| WhatsApp | Signed Meta webhook; only `type=text` | Tenant through `TenantChannel.phone_number_id`; `external_user_ref = HMAC(wa_id)` | Redis deduplication; welcome as a **separate message**; per-user rate; always 200 after a valid signature |
+| `/chat` UI | Static files in `app/static/chat/`; only with development docs | Same API with key pasted in the browser | Dev only (`chat_ui.py`); no end-user auth |
 
-Referências: `app/api/routes/chat.py`, `app/api/webhooks/whatsapp.py`,
+References: `app/api/routes/chat.py`, `app/api/webhooks/whatsapp.py`,
 `app/api/routes/chat_ui.py`, `app/static/chat/app.js`.
 
 ---
 
-## 5. O que o fluxo não faz
+## 5. What the flow does not do
 
-Limites honestos alinhados a [Limitações do README](../README.md#limitações-e-próximos-passos):
+Honest limits aligned with the [README limitations](../README.md#limitations-and-next-steps):
 
-| Limite | Detalhe no código |
+| Limit | Code detail |
 |---|---|
-| Sem auth de usuário final na API | Só API key de tenant; verificação de pedido = matching de contato local (`lookup_order`), não login |
-| Sem notificação humana real | `HandoffRequest` + audit; nenhum canal externo de alerta |
-| Sem serialização total por conversa | Lock advisory só para decisão de primeiro contato; vault GET/SET e commits do turno não são atômicos entre workers |
-| Guardrails lexicais | Regex/folding em `guardrails.py` — não é NLI; pode rejeitar respostas corretas ou deixar passar edge cases |
-| Fake/hash ≠ qualidade LLM | Providers `fake`/`hash` exercitam o pipeline; não validam grounding com modelo real |
-| Detecção de PII incompleta | Regras + nomes conhecidos; nomes em minúsculas fora de autoapresentação podem escapar (`privacy.py` docstring) |
-| Conflito de fontes | Depende do modelo seguir `POLICY_TEXT`; não há checker automático de contradição |
-| WhatsApp | Adapter não validado contra Meta ao vivo (docstring do webhook) |
+| No end-user auth in the API | Tenant API key only; order verification = local contact matching (`lookup_order`), not login |
+| No actual human notification | `HandoffRequest` + audit; no external alert channel |
+| No complete per-conversation serialization | Advisory lock only for the first-contact decision; vault GET/SET and turn commits are not atomic across workers |
+| Lexical guardrails | Regex/folding in `guardrails.py`, not NLI; may reject correct answers or miss edge cases |
+| Fake/hash ≠ LLM quality | `fake`/`hash` providers exercise the pipeline; they do not validate real-model grounding |
+| Incomplete PII detection | Rules + known names; lowercase names outside self-introductions may escape (`privacy.py` docstring) |
+| Source conflicts | Depends on the model following `POLICY_TEXT`; no automatic contradiction checker |
+| WhatsApp | Adapter not validated against live Meta (webhook docstring) |
 
 ---
 
-## Mapa rápido código ↔ seção
+## Quick code ↔ section map
 
-| Tema | Arquivos / funções |
+| Topic | Files / functions |
 |---|---|
-| Turno completo | `ChatService.handle_message` |
-| Input/output safety | `check_input`, `output_violation`, `is_greeting_only`, `has_factual_claim`, `admits_no_information`, `discusses_sensitive_topic` |
+| Complete turn | `ChatService.handle_message` |
+| Input/output safety | `check_input`, `output_violation`, `is_greeting_only`, `is_out_of_scope_refusal`, `has_factual_claim`, `admits_no_information`, `discusses_sensitive_topic` |
 | Tools | `build_customer_service_agent`; `app/tools/{catalog,inventory,orders,handoff}.py` |
 | RAG | `retrieval.retrieve`; `search_knowledge` |
-| Privacidade / modelo | `redact_user_text`, `scan_outbound`; `PrivacyGuardedModel` |
-| Contrato | `ChatReply`; `HANDOFF_REASONS`; `docs/platform/contracts.md` |
+| Privacy / model | `redact_user_text`, `scan_outbound`; `PrivacyGuardedModel` |
+| Contract | `ChatReply`; `HANDOFF_REASONS`; `docs/platform/contracts.md` |

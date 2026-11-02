@@ -1,0 +1,46 @@
+{
+  "date": "2026-11-02T14:07:45.456603+00:00",
+  "model": "gpt-5-mini",
+  "prompt_version": "commerce-privacy-v8",
+  "attempt": 1,
+  "turns": [
+    {
+      "customer": "Hi! Which acoustic guitars do you have in stock for up to R$1,000?",
+      "reply": "Não consegui confirmar essa informação com segurança. Posso ajudar com outra dúvida.\nSolicitei atendimento humano para ajudar com sua solicitação.",
+      "welcome_message": null,
+      "tools_used": [
+        "search_products",
+        "request_human_handoff"
+      ],
+      "sources": [],
+      "handoff": {
+        "handoff_id": "678fc7de-109d-4826-b17c-1dee6d929e88",
+        "reason": "low_confidence"
+      },
+      "grounded": false
+    },
+    {
+      "customer": "How much does the Yamaha C40 cost?",
+      "reply": "The Yamaha C40 Nylon Natural is R$599.90 and is currently available. Gostaria que eu verifique a quantidade em estoque, opções de frete ou mostre modelos similares?",
+      "welcome_message": null,
+      "tools_used": [
+        "search_products"
+      ],
+      "sources": [],
+      "handoff": null,
+      "grounded": true
+    },
+    {
+      "customer": "Is that Yamaha C40 in stock, and how many units are available?",
+      "reply": "Yes — the Yamaha C40 Nylon Natural is in stock. We currently have 12 units available. The listed price is R$599.90. Quer que eu verifique opções de frete, reserve uma unidade ou mostre modelos similares?",
+      "welcome_message": null,
+      "tools_used": [
+        "search_products",
+        "check_stock"
+      ],
+      "sources": [],
+      "handoff": null,
+      "grounded": true
+    }
+  ]
+}

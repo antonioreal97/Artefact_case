@@ -11,7 +11,7 @@ whether identity verification succeeded.
 
 ```mermaid
 flowchart TB
-    Customer[Customer] --> Agent[Emporio support agent]
+    Customer[Customer] --> Agent["Empório support agent"]
     Staff[Support staff] --> Agent
     Agent --> Catalog[(Local catalog and policies)]
     Agent --> Orders[(Local customer and order data)]
