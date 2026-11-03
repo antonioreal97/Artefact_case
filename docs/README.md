@@ -24,8 +24,12 @@ statistical quality evaluation. The second tenant is synthetic and test-only.
 
 | Document | Purpose |
 |---|---|
+| [Running the agent](running.md) | Full Docker, host Python/uv, ports, PowerShell, real-model and in-container test instructions |
+| [Limitations](limitations.md) | Full limitations and next steps (README keeps the top five) |
+| [Platform extensions](platform/extensions.md) | Optional multi-tenancy, WhatsApp, uploads, jobs, rate limits, `/chat` UI, triage menu, welcome message |
+| [Coding assistants](coding-assistants.md) | Full per-workstream tool table |
 | [Customer-service flows](customer-service-flows.md) | Turn/intent flowcharts derived from code (guardrails, tools, handoffs, channels) for recruiters and the store team |
-| [Browser test interface](../README.md) (section “Browser test interface”) | Local chat evaluation at `/chat`, gated with development docs; no frontend build or end-user authentication |
+| [Browser test interface](platform/extensions.md) (section “Browser test interface”) | Local chat evaluation at `/chat`, gated with development docs; no frontend build or end-user authentication |
 | [ADR 005](adr/005-multi-tenant-platform-branch.md) | Delivered stack and explicit deviations from the original architecture/token policy |
 | [ADR 006](adr/006-langchain-model-layer.md) | LangChain model/embedding adapters under the existing Agents SDK loop and privacy boundary; offline regressions and limited live OpenAI validation |
 | [Platform contracts](platform/contracts.md) | Shared interfaces and module ownership |
@@ -35,11 +39,11 @@ statistical quality evaluation. The second tenant is synthetic and test-only.
 | [Root evaluation cases](../evals/rag_eval_cases.jsonl) | Cases used by the implemented evaluation harness |
 | [Conversation examples](../examples/conversations/) (root README, section "Interaction examples") | Five saved deterministic demonstrations with English translations, plus separate live English recordings |
 
-After X1 integration (2026-11-01): 603 tests and 123 subtests passed on two runs,
-mypy clean on 63 app files, and all deterministic evaluation gates/soft metrics passed.
-The known O-8 flake remains open.
-See [development-process.md](development-process.md) §4.2, not an older report,
-for the integration checkpoint. Passing fake-mode checks does not establish LLM quality.
+Current host suite (see root README): 1071 passed, 12 xfailed, 130 subtests passed;
+deterministic evaluation passes all hard gates with soft metrics at 100%.
+Historical X1 integration checkpoint (2026-11-01): 603 tests and 123 subtests —
+see [development-process.md](development-process.md) §4.2. Passing fake-mode checks
+does not establish LLM quality. The known O-8 flake remains open.
 
 ## Historical evidence for the delivered implementation
 

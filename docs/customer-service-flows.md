@@ -62,6 +62,20 @@ flowchart TD
   reveal --> persist["Persist assistant + tools + ChatReply"]
 ```
 
+Original turn diagram (Portuguese labels preserved):
+
+```text
+API autenticada → tenant → classificação/tokenização local → agente limitado
+   ├─ catálogo, estoque, pedidos → ferramentas → banco local
+   └─ políticas → busca híbrida → trechos não confiáveis + citações
+→ validação de saída → revelação local autorizada → resposta + persistência
+```
+
+In English: authenticated API → tenant → local classification/tokenization → bounded agent;
+catalog, stock and orders use tools and the local database; policies use hybrid retrieval,
+untrusted excerpts and citations; output validation → authorized local reveal → reply and
+persistence.
+
 ### Steps and code
 
 | Step | What happens | Code |
@@ -328,7 +342,7 @@ References: `app/api/routes/chat.py`, `app/api/webhooks/whatsapp.py`,
 
 ## 5. What the flow does not do
 
-Honest limits aligned with the [README limitations](../README.md#limitations-and-next-steps):
+Honest limits aligned with the [README limitations](../README.md#limitations) and the [full list](limitations.md):
 
 | Limit | Code detail |
 |---|---|
