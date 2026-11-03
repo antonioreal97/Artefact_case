@@ -591,6 +591,27 @@ async def test_missing_model_key_is_safe(session_factory, session, commerce):
     assert "OPENAI" not in reply.reply
 
 
+@pytest.mark.parametrize(
+    ("provider", "effort", "expected"),
+    [("openai", "low", "low"), ("openai", None, None), ("fake", "low", None)],
+)
+async def test_reasoning_effort_reaches_native_model_only(
+    session_factory, session, commerce, provider, effort, expected
+):
+    model = scripted("Olá!")
+    service = ChatService(
+        session_factory,
+        Settings(llm_provider=provider, embedding_provider="hash", openai_reasoning_effort=effort),
+        InMemoryVaultStore(),
+        lambda settings, allowlist: GuardedModelProvider(model, allowlist),
+        limiter=InMemoryAttemptLimiter(),
+    )
+    await turn(service, session, commerce, "Uma dúvida")
+    reasoning = model.calls[0].model_settings.reasoning
+    assert (reasoning.effort if reasoning else None) == expected
+    assert model.calls[0].model_settings.store is False
+
+
 async def test_vault_save_failure_blocks_model(session_factory, session, commerce):
     class BrokenSave(InMemoryVaultStore):
         async def save(self, *args):

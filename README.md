@@ -404,7 +404,14 @@ compatibility has not been tested.
 
 The native path remains available with `LLM_PROVIDER=openai`, `EMBEDDING_PROVIDER=openai`,
 `OPENAI_CHAT_MODEL=gpt-5-mini` and `OPENAI_EMBEDDING_MODEL=text-embedding-3-small`.
-Defaults are implementation choices without a quality, cost or latency benchmark.
+Defaults are implementation choices without a quality or cost benchmark.
+`OPENAI_REASONING_EFFORT=low` is the one measured default: on the 27-turn battery it cut
+median latency from 11.8s to 9.3s and p90 from 17.7s to 12.0s versus the provider default,
+with 23 vs 24 useful answers (within run-to-run variance). `minimal` reached a 4.0s median
+but dropped to 21/27 and gave wrong refusals, so it is not the default (D-37). Accepted
+values are `minimal`, `low`, `medium` and `high`; an empty value sends no reasoning setting
+(provider default). It applies to the native OpenAI adapter only; the LangChain and fake
+adapters ignore it.
 The LangChain adapter uses global `LANGCHAIN_CHAT_MODEL`; the tenant's native
 `chat_model` field does not override it. LangChain streaming is not implemented:
 the current API uses `Runner.run` without streaming. Failures and timeouts retain
@@ -615,6 +622,8 @@ model is nondeterministic.
 | R8, LangChain (`openai:gpt-5-mini`) | 22 |
 | R9, native adapter (`commerce-privacy-v9`) | 24 |
 | R10, native adapter (`commerce-privacy-v10`, humanized tone) | 24 |
+| R11, native adapter, `OPENAI_REASONING_EFFORT=low` (shipped default) | 23 |
+| R11, native adapter, `OPENAI_REASONING_EFFORT=minimal` (rejected) | 21 |
 
 In every run, “quero falar com um atendente” (“I want to speak to a representative”)
 was correctly handed off. The first run showed that the privacy filter itself blocked
@@ -636,7 +645,8 @@ Anthropic and Ollama were not run.
 
 - **Quality and grounding (A-2/A-4, O-4):** the Portuguese live battery reached 24/27
   useful answers on R9 native after the English-customer fixes and again on R10 native
-  after the humanized-tone changes, with earlier rounds
+  after the humanized-tone changes (23/27 on R11 with `OPENAI_REASONING_EFFORT=low`),
+  with earlier rounds
   between 19 and 23; evaluation with held-out questions, more multi-turn conversations
   and conflicting sources is still missing. Output rules are lexical: they reduce
   fabrication but also reject correct answers. A citation or product name does not prove
@@ -654,6 +664,13 @@ Anthropic and Ollama were not run.
   retrieval still vary by phrasing; offers of tool-less actions (starting a return, quoting
   freight) are prompt-only, enforced only by the success-claim check when the model claims
   the action happened. Broader multilingual evaluation is still open.
+- **Latency:** a reply takes several seconds because each turn makes 2–3 sequential
+  `gpt-5-mini` calls (choose a tool, read its result, answer); catalog tools take
+  milliseconds and knowledge search about 2s. On the 27-turn battery (2026-11-03),
+  `OPENAI_REASONING_EFFORT=low` measured median 9.3s, p90 12.0s, max 27.6s, mean 9.4s
+  (provider default: 11.8s / 17.7s / 44.2s / 11.9s). There is no streaming, so the
+  customer waits for the whole answer. `minimal` (median 4.0s) cost answer quality. Next
+  steps: stream the final answer, and answer simple policy questions with one model call.
 - **Money written in words:** price validation reads digits only (as on `main`). A budget
   written in words ("até mil reais") is not exempt, so an answer that repeats it as
   "até R$1.000" falls back to a human; a price written only in words ("custa mil reais")

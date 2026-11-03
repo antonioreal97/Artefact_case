@@ -13,6 +13,7 @@ from typing import cast
 import structlog
 from agents import ModelProvider, ModelSettings, RunConfig, Runner
 from agents.items import TResponseInputItem
+from openai.types.shared import Reasoning
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -507,7 +508,14 @@ class ChatService:
                             model=agent_settings.chat_model or self.settings.openai_chat_model,
                             tracing_disabled=not self.settings.openai_tracing_enabled,
                             trace_include_sensitive_data=False,
-                            model_settings=ModelSettings(store=False, parallel_tool_calls=False),
+                            model_settings=ModelSettings(
+                                store=False,
+                                parallel_tool_calls=False,
+                                reasoning=Reasoning(effort=self.settings.openai_reasoning_effort)
+                                if self.settings.llm_provider == "openai"
+                                and self.settings.openai_reasoning_effort
+                                else None,
+                            ),
                         ),
                     )
                     answer = str(result.final_output)

@@ -160,6 +160,21 @@ def test_timeout_defaults():
     assert settings.model_timeout_seconds == 30
     assert settings.turn_timeout_seconds == 75
     assert settings.max_agent_turns == 8
+    assert settings.openai_reasoning_effort == "low"
+
+
+@pytest.mark.parametrize(
+    "value,expected", [("", None), ("  ", None), ("minimal", "minimal"), ("high", "high")]
+)
+def test_reasoning_effort_setting(value, expected):
+    settings = Settings(_env_file=None, app_env="test", openai_reasoning_effort=value)
+    assert settings.openai_reasoning_effort == expected
+
+
+@pytest.mark.parametrize("value", ["LOW", "xhigh", "fast"])
+def test_reasoning_effort_rejects_unknown(value):
+    with pytest.raises(ValidationError, match="openai_reasoning_effort"):
+        Settings(_env_file=None, app_env="test", openai_reasoning_effort=value)
 
 
 @pytest.mark.integration
