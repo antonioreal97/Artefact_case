@@ -135,8 +135,9 @@ The repository-wide policy in `../SECURITY.md` is authoritative if this summary 
 
 ## Working assumptions
 
-- The agent speaks PT-BR because the store and customers are Brazilian; repository
-  documentation is written in English for the evaluation audience.
+- The agent replies in the customer's language, PT-BR by default, because the store and
+  customers are Brazilian; repository documentation is written in English for the evaluation
+  audience.
 - `(67) 3341-4444` is the main/store telephone and `(67) 3321-4500` is the remote WhatsApp
   channel; they are separate channels rather than conflicting values.
 - The ASCII email `contato@emporiodamusica.com.br` is canonical.

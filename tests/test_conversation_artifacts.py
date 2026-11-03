@@ -9,6 +9,7 @@ import pytest
 from scripts.demo_conversations import _english
 
 ROOT = Path(__file__).resolve().parents[1] / "examples/conversations"
+LIVE = Path(__file__).resolve().parents[1] / "evals/live/english-conversations"
 
 
 def test_untranslated_demo_dialogue_fails_export():
@@ -17,7 +18,7 @@ def test_untranslated_demo_dialogue_fails_export():
 
 
 def test_live_recordings_preserve_api_fields_and_omit_personal_inputs():
-    paths = sorted((ROOT / "live-en").glob("*.md"))
+    paths = sorted(path for path in LIVE.glob("*.md") if path.name != "README.md")
     assert len(paths) == 2
     for path in paths:
         content = path.read_text()
@@ -45,7 +46,7 @@ def test_live_recordings_preserve_api_fields_and_omit_personal_inputs():
             assert "[[" not in turn["reply"]
             if turn["welcome_message"]:
                 assert turn["welcome_message"] in content
-    for path in (ROOT / "live-en").rglob("*.json"):
+    for path in LIVE.rglob("*.json"):
         for turn in json.loads(path.read_text())["turns"]:
             assert "@" not in turn["customer"]
             assert not re.search(r"\b(?:order|pedido)\s*#?\s*\d+", turn["customer"], re.I)
