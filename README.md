@@ -5,6 +5,24 @@ It answers catalog, price and stock questions through typed tools, retrieves sto
 It requests human handoff when needed and is instructed to reply in the customer's language, with Portuguese as the default.
 Its configured tone is informal, professional and welcoming: “Sua música começa aqui” (“Your music starts here”).
 
+## Reviewer's guide (5 minutes)
+
+1. **Run it (no API key, deterministic):** `./scripts/docker_up.sh --smoke` starts the
+   stack with a scripted fake model and hash embeddings and checks one answer to the case
+   question. Details: [Run with Docker](#run-with-docker-recommended).
+2. **Run it with the real model:** in `.env` set `LLM_PROVIDER=openai`,
+   `EMBEDDING_PROVIDER=openai` and `OPENAI_API_KEY`, then run `docker compose down -v` and
+   `./scripts/docker_up.sh` to re-index with real embeddings (this deletes the demo data and
+   makes billable calls). Details: [Real model inside Docker](#real-model-inside-docker).
+   Then open `http://127.0.0.1:8000/chat` or use the curl example below.
+3. **Read, in this order:** the [five interaction examples](examples/conversations/),
+   the [customer-service flows](docs/customer-service-flows.md) and the
+   [technical decisions](#technical-decisions).
+4. **Scope:** the core of the case is one agent with seven typed tools, RAG over the
+   store manual and a privacy boundary (`app/agents/`, `app/tools/`, `app/rag/`,
+   `app/services/chat.py`). The multi-tenant platform around it is a deliberate,
+   optional extension; see [why](#platform-extensions-optional).
+
 ## How the agent works
 
 1. Authenticate the request, identify the store and load or create the conversation.
@@ -32,7 +50,7 @@ The table separates implemented behavior from delivery obligations that code alo
 | Handle questions outside the store's scope appropriately | [Policy](app/agents/instructions.py) requires a polite refusal and an offer of store help, without human handoff; [example 05](examples/conversations/05-out-of-scope-and-address.md) demonstrates it |
 | Justify framework/approach, model/provider, interface, history and data treatment | [Technical decisions](#technical-decisions), [real-model mode](#real-model-mode-optional) and [ADR 005](docs/adr/005-multi-tenant-platform-branch.md) explain the choices and their scope |
 | Complete run instructions and configuration | [Docker quick start](#run-with-docker-recommended), [host setup](#run-offline), [.env.example](.env.example) and [model configuration](#real-model-mode-optional) |
-| Known limitations, next steps and documented assumptions | [Limitations and next steps](#limitations-and-next-steps); imported CSV snapshot, optional platform scope and conflicting manual rules are explicitly qualified |
+| Known limitations, next steps and documented assumptions | [Limitations and next steps](#limitations-and-next-steps) and [Assumptions](#assumptions) |
 | Explain coding-assistant choices and workflow | [Use of coding assistants](#use-of-coding-assistants) |
 | 3–5 varied saved conversations, including a nontrivial data lookup or policy application | [Five offline examples](#interaction-examples), including verified order status and return-policy application; runtime queries use the local snapshot |
 | Public GitHub repository with a genuine commit history; submit its link by email and stop changes at the deadline | [Repository](https://github.com/antonioreal97/Artefact_case) and its commit history are the delivery artifacts; email submission, public visibility and deadline compliance require owner verification |
@@ -46,6 +64,31 @@ The table separates implemented behavior from delivery obligations that code alo
 - [Tests and evaluation](#tests-and-evaluation)
 - [Limitations](#limitations-and-next-steps)
 - [Use of coding assistants](#use-of-coding-assistants)
+
+## Assumptions
+
+The brief asks to document reasonable interpretations where information is missing. The
+full list is in [project context](docs/project-context.md#working-assumptions); the ones
+that shape behavior are:
+
+- **Data freshness:** the CSVs are an imported snapshot, not a live ERP; "real-time" lookups
+  query that snapshot through typed tools.
+- **Order privacy:** the brief does not define identity checks, so an order is revealed only
+  when the customer gives the order number plus the phone or e-mail of the purchase; three
+  wrong contacts within an hour lock the lookup.
+- **Personal data:** the CSV values are fictitious but treated as real personal data, so they
+  are tokenized before any model call.
+- **Conflicting manual rules:** where the manual contradicts itself (for example, minimum
+  installment values), the agent states what the sources agree on and hands off instead of
+  choosing a rule.
+- **Out of scope:** a question unrelated to the store gets a polite refusal and an offer to
+  help with the store, without human handoff; a store question the manual cannot answer is
+  handed off.
+- **Language:** the agent replies in the customer's language, Portuguese by default (the
+  store, manual and customers are Brazilian); the repository and documentation are in
+  English, as the evaluation requires.
+- **Human handoff:** a handoff is a persisted request for the store team; no real
+  notification channel exists in this prototype.
 
 ## Run with Docker (recommended)
 
@@ -328,20 +371,18 @@ LANGCHAIN_CHAT_MODEL=openai:gpt-5-mini
 EMBEDDING_PROVIDER=langchain
 LANGCHAIN_EMBEDDING_MODEL=openai:text-embedding-3-small
 EMBEDDING_DIMENSIONS=1536
-# OPENAI_API_KEY=<sua chave>
+# OPENAI_API_KEY=<your key>
 OPENAI_TRACING_ENABLED=false
 LANGSMITH_TRACING=false
 LANGCHAIN_TRACING_V2=false
 ```
 
-The preserved `<sua chave>` placeholder means “your key.”
-For Anthropic, change `LANGCHAIN_CHAT_MODEL=anthropic:<modelo-disponível-na-sua-conta>`
-(“model available in your account”) and set `ANTHROPIC_API_KEY`; retain a separate
+For Anthropic, change `LANGCHAIN_CHAT_MODEL=anthropic:<model-available-in-your-account>` and set `ANTHROPIC_API_KEY`; retain a separate
 embedding provider, such as OpenAI with its key. For local Ollama, use
-`LANGCHAIN_CHAT_MODEL=ollama:<modelo-com-tools>` (“model with tools”) and
+`LANGCHAIN_CHAT_MODEL=ollama:<model-with-tools>` and
 `OLLAMA_BASE_URL=http://localhost:11434`; in Docker, use
 `http://host.docker.internal:11434`. Install the model in Ollama beforehand.
-`LANGCHAIN_EMBEDDING_MODEL=ollama:<modelo-de-1536-dimensões>` (“1536-dimension model”)
+`LANGCHAIN_EMBEDDING_MODEL=ollama:<1536-dimension-model>`
 requires vectors of that dimension; other dimensions require a new migration and
 reindexing, outside this scope. Names inside `<...>` are placeholders: actual model
 compatibility has not been tested.
@@ -385,8 +426,14 @@ in every environment.
 
 The delivered solution on this repository's `main` branch extends the case into a
 **multi-tenant platform**. The case asks for a messaging agent, rationale, instructions
-and examples. Multi-tenancy, generic uploads and WhatsApp are **optional experiments**
-chosen by the project owner, rather than case requirements. [ADR 005](docs/adr/005-multi-tenant-platform-branch.md)
+and examples, solved as simply as possible; multi-tenancy, generic uploads and WhatsApp are
+not case requirements. I chose to build them on purpose: to show how I would build an
+agent meant to scale and keep running for long periods with little maintenance, where new
+stores, channels and policy documents are configuration and operator actions rather than
+code changes. A minimal script would answer the case, but usually needs small edits every
+time the data, documents or channels change. This is a design intent, not a measured
+result: no load or long-running operation tests were run, and the limitations below list
+what still needs work before production use. [ADR 005](docs/adr/005-multi-tenant-platform-branch.md)
 records that decision and its heavier runtime compared with the original smaller design.
 
 Tenant isolation, the WhatsApp webhook, document uploads and ingestion jobs, Redis
@@ -482,7 +529,7 @@ Regenerate the examples with Postgres available:
 uv run python -m scripts.demo_conversations
 ```
 
-[Live English conversations](examples/conversations/live-en/) were re-recorded against
+[Live English conversations](evals/live/english-conversations/) were re-recorded against
 `gpt-5-mini` under `commerce-privacy-v9` (catalog/price/stock: attempt 2; return/order/scope:
 attempt 3; earlier attempts archived). Attempts 1–2 of the order conversation were refused
 because the deliberate wrong-contact turns of earlier recordings had locked order 1 (three
