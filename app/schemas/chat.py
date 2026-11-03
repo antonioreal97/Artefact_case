@@ -37,6 +37,7 @@ class ChatReply(BaseModel):
             "empty, grounded is false and handoff is null. Null on later turns."
         ),
     )
+    route: str | None = None  # optional routing telemetry; absent configuration keeps null
     sources: list[SourceRef] = Field(default_factory=list)
     handoff: HandoffInfo | None = None
     grounded: bool  # True if every factual claim came from a tool result or cited source

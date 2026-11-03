@@ -18,12 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import Settings, get_settings
 from app.core.database import Base
 from app.core.logging import configure_logging
-from app.models import Chunk, CommerceCustomer, CommerceOrder
+from app.models import AgentSettings, Chunk, CommerceCustomer, CommerceOrder
 from app.schemas.chat import ChatReply
 from app.services.attempt_limiter import InMemoryAttemptLimiter
 from app.services.chat import ChatService
 from app.services.privacy_vault import TOKEN_RE
 from app.services.vault_store import InMemoryVaultStore
+from scripts.create_tenant import TRIAGE_CONFIG
 from scripts.eval_rag import (
     ADMIN_URL_DEFAULT,
     ROOT,
@@ -38,6 +39,25 @@ DEFAULT_OUTPUT_DIR = ROOT / "examples" / "conversations"
 # Exact fixture translations: unknown dialogue fails export instead of silently
 # publishing a missing/stale translation. Numeric catalog values stay verbatim.
 _TRANSLATIONS = {
+    "Como posso te ajudar?": "How can I help you?",
+    "1. Horário e endereço da loja": "1. Store hours and address",
+    "2. Status do meu pedido": "2. My order status",
+    "3. Trocas e devoluções": "3. Exchanges and returns",
+    "4. Produtos, preços e estoque": "4. Products, prices and stock",
+    "5. Falar com um atendente": "5. Talk to a staff member",
+    "Responda com o número ou escreva sua dúvida.": "Reply with a number or write your question.",
+    (
+        "Horário: Segunda a sexta, das 9h às 18h; sábado, das 9h às 13h. "
+        "Domingo e feriados, fechado."
+    ): (
+        "Hours: Monday to Friday, 9 am to 6 pm; Saturday, 9 am to 1 pm. "
+        "Closed Sundays and holidays."
+    ),
+    "Endereço: Rua 14 de Maio, 3200, Centro, Campo Grande - MS, 79202-333": (
+        "Address: Rua 14 de Maio, 3200, Centro, Campo Grande - MS, 79202-333"
+    ),
+    "Telefone / WhatsApp: (67) 3341-4444": "Phone / WhatsApp: (67) 3341-4444",
+    "E-mail: contato@emporiodamusica.com.br": "Email: contato@emporiodamusica.com.br",
     "Quais opções de violões disponíveis custando até R$1000?": (
         "Which acoustic guitars are available for up to R$1,000?"
     ),
@@ -216,6 +236,7 @@ async def _demos(factory: async_sessionmaker[AsyncSession], tenant_id: uuid.UUID
                     "Vou corrigir o contato. [mesmo número informado; e-mail correto informado]",
                 ),
             ),
+            "Order status uses deterministic triage and the existing verified lookup tool. "
             "Seed data is fictitious. Personal inputs are omitted from this example; "
             "only the final customer reply shows authorized details, revealed locally "
             "after verification. No model payload is exported.",
@@ -227,7 +248,9 @@ async def _demos(factory: async_sessionmaker[AsyncSession], tenant_id: uuid.UUID
                 DemoTurn("Qual o endereço da loja?"),
                 DemoTurn("Qual é a capital da Islândia?"),
             ),
-            "An unrelated question is refused without a human handoff or factual grounding.",
+            "The address shortcut uses deterministic triage and public tenant configuration "
+            "without a model or RAG call (grounded=false). An unrelated question then reaches "
+            "the agent and is refused without a human handoff or factual grounding.",
         ),
     ]
 
@@ -264,6 +287,7 @@ def _render_turn(index: int, turn: DemoTurn, reply: ChatReply) -> str:
             "",
             _english(reply.reply),
             "",
+            f"- Route: {reply.route or 'agent'}.",
             f"- Tools: {', '.join(reply.tools_used) or 'none'}.",
             f"- Citations: {sources}.",
             f"- Handoff: {reply.handoff.reason if reply.handoff else 'none'}.",
@@ -292,6 +316,9 @@ async def generate_conversations(output_dir: Path = DEFAULT_OUTPUT_DIR) -> list[
                 # in this throw-away DB so identical source data yields identical labels.
                 # No content, thresholds, embeddings or retrieval code are changed.
                 async with factory() as session:
+                    config = await session.get(AgentSettings, tenant_id)
+                    assert config is not None
+                    config.extra = {**config.extra, "triage": TRIAGE_CONFIG}
                     chunks = (
                         await session.execute(
                             select(Chunk.id, Chunk.chunk_index, Chunk.content).where(

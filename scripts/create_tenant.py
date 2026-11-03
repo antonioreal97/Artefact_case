@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_engine, get_sessionmaker
 from app.core.security import generate_api_key, hash_api_key
 from app.models import AgentSettings, ApiKey, Tenant, TenantChannel
+from app.services.triage import MENU
 
 WELCOME_MESSAGE = (
     "Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, "
@@ -54,6 +55,26 @@ PUBLIC_CONTACT_VALUES = [
     "12.345.678/0001-90",
     "BR4K7M2X9P1BR",  # Published tracking-format example, not a customer order.
 ]
+
+
+# Manual §1.2/§2 (p. 2), §4.1 (p. 4); ASCII email is canonical (docs/project-context.md).
+TRIAGE_CONFIG = {
+    "enabled": True,
+    "menu": MENU,
+    "hours": "Segunda a sexta, das 9h às 18h; sábado, das 9h às 13h. Domingo e feriados, fechado.",
+    "address": "Rua 14 de Maio, 3200, Centro, Campo Grande - MS, 79202-333",
+    "phone": "(67) 3341-4444",
+    "email": "contato@emporiodamusica.com.br",
+    "returns": (
+        "Para compras online, você pode pedir a devolução por arrependimento em até 7 dias "
+        "corridos após receber o produto, sem precisar justificar. O produto deve estar na "
+        "embalagem original, sem sinais de uso, com todos os acessórios e manuais. "
+        "O reembolso é feito na mesma forma de pagamento original em até 10 dias úteis. "
+        "O frete de devolução por arrependimento fica por conta da loja.\n\n"
+        "Fonte: Políticas da Loja, §4.1 Direito de Arrependimento (Compras Online) (p. 4)\n"
+        "Se tiver uma dúvida específica, é só escrever."
+    ),
+}
 
 
 def api_key_from_env(variable: str | None) -> str | None:
@@ -119,6 +140,7 @@ async def create_tenant(
     whatsapp_phone_number_id: str | None = None,
     chat_api_key: str | None = None,
     refresh_welcome_and_handoff: bool = False,
+    refresh_triage: bool = False,
 ) -> tuple[uuid.UUID, str | None]:
     """Stage idempotent seed configuration. Caller commits before revealing a new key.
 
@@ -150,7 +172,7 @@ async def create_tenant(
                 welcome_message=WELCOME_MESSAGE,
                 handoff_message=HANDOFF_MESSAGE,
                 public_contact_values=PUBLIC_CONTACT_VALUES,
-                extra={"tagline": "Sua música começa aqui."},
+                extra={"tagline": "Sua música começa aqui.", "triage": TRIAGE_CONFIG},
             )
         )
     else:
@@ -163,6 +185,8 @@ async def create_tenant(
         config.public_contact_values = list(
             dict.fromkeys([*(config.public_contact_values or []), *PUBLIC_CONTACT_VALUES])
         )
+    if config is not None and refresh_triage:
+        config.extra = {**(config.extra or {}), "triage": TRIAGE_CONFIG}
     plaintext = await _ensure_key(
         session, tenant.id, name="seed", scopes=SCOPES, api_key=api_key, generate=True
     )
@@ -194,7 +218,12 @@ async def create_tenant(
     return tenant.id, plaintext
 
 
-async def run(api_key_variable: str | None, *, refresh_welcome_and_handoff: bool = False) -> None:
+async def run(
+    api_key_variable: str | None,
+    *,
+    refresh_welcome_and_handoff: bool = False,
+    refresh_triage: bool = False,
+) -> None:
     key = api_key_from_env(api_key_variable)
     try:
         async with get_sessionmaker()() as session:
@@ -204,6 +233,7 @@ async def run(api_key_variable: str | None, *, refresh_welcome_and_handoff: bool
                 whatsapp_phone_number_id=os.environ.get("WHATSAPP_PHONE_NUMBER_ID"),
                 chat_api_key=optional_api_key_from_env(CHAT_KEY_ENV),
                 refresh_welcome_and_handoff=refresh_welcome_and_handoff,
+                refresh_triage=refresh_triage,
             )
             await session.commit()
         if plaintext:
@@ -225,12 +255,18 @@ def main() -> None:
             "Without this flag, existing operator-set text is preserved."
         ),
     )
+    parser.add_argument(
+        "--refresh-triage",
+        action="store_true",
+        help="Explicitly enable/reset Empório triage; preserve other extra settings.",
+    )
     args = parser.parse_args()
     try:
         asyncio.run(
             run(
                 args.api_key_from_env,
                 refresh_welcome_and_handoff=args.refresh_welcome_and_handoff,
+                refresh_triage=args.refresh_triage,
             )
         )
     except Exception as exc:

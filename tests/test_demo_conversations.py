@@ -24,6 +24,8 @@ EXPECTED_FILES = {
 async def test_demo_conversations(tmp_path: Path) -> None:
     paths = await generate_conversations(tmp_path / "first")
     assert {path.name for path in paths} == EXPECTED_FILES
+    existing = await asyncio.to_thread(lambda: list(Path("examples/conversations").iterdir()))
+    assert {path.name for path in existing} == EXPECTED_FILES | {"README.md"}
     contents = {path.name: path.read_text() for path in paths}
     for content in contents.values():
         assert "deterministic fake model + hash embeddings; not a real LLM" in content
@@ -66,9 +68,11 @@ async def test_demo_conversations(tmp_path: Path) -> None:
     assert "Situação: entregue" in second
     assert "Rastreamento: BRAB1234567BR" in second
     assert "Previsão de entrega: 2025-10-25" in second
+    assert "- Route: triage:order" in order
     assert "@" not in order and "pedido 1" not in order
     address, refusal = contents["05-out-of-scope-and-address.md"].split("## Turn 2")
-    assert "Rua 14 de Maio, 3200" in address and "[S" in address
+    assert "Rua 14 de Maio, 3200" in address and "- Route: triage:hours" in address
+    assert "- Tools: none" in address and "- Grounded: false" in address
     assert "só com assuntos da loja" in refusal
     assert "Handoff: none" in refusal and "Grounded: false" in refusal
     assert "request_human_handoff" not in refusal
