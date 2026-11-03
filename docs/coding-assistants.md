@@ -14,40 +14,39 @@ exclusive file ownership, wrote task specifications, answered workers' questions
 reran every check before accepting each delivery and proposed commits.
 The tools identified per workstream are:
 
-| Workstream | Tool |
-|---|---|
-| All stages — monitoring every file modified by each agent, calling the needed tools and debugging throughout development | Cursor (used by the owner) |
-| B — infrastructure | Orca, Hermes and Cursor |
-| C — RAG | Claude Code and Cursor; the embedding-model choice in PostgreSQL/pgvector is still open |
-| D — commerce tools | Claude Code and Cursor; planned channel: WhatsApp |
-| E — initial agent implementation | OpenAI Codex |
-| F — API (flow validation) | OpenAI Codex |
-| R1 — security review | OpenAI Codex |
-| E2, E3 — agent fixes | Claude Code |
-| F2, F3 — platform fixes | Claude Code |
-| R2 — adversarial tests | Claude Code |
-| G1 — evaluation | Claude Code |
-| R3 — architecture review | OpenAI Codex |
-| X1 — example conversations, catalog filtering and stock validation | OpenAI Codex |
-| X2 — this README and documentation alignment | OpenAI Codex |
-| D1 — complete Docker run | OpenAI Codex |
-| L1 — LangChain model layer | OpenAI Codex |
-| U1 — browser test interface | OpenAI Codex |
-| W1 — welcome message | OpenAI Codex (main implementation) and Cursor (final review, verification and completion) |
-| F1 — customer-service flow documentation | Cursor (Composer / Orca worker) |
-| R4–R8 — fixes after live-model runs | Claude Code ran the batteries and diagnosed causes; OpenAI Codex implemented the fixes |
-| E1 — out-of-scope refusal without handoff, bilingual demo conversations, first English live recordings | OpenAI Codex |
-| T — English translation of the documentation and README restructure | OpenAI Codex (README, docs index, service flows, context/evaluation/security docs) and Cursor (process, architecture, ADRs, reviews and test reports) |
-| E2 — English-customer fixes (`commerce-privacy-v9`), re-recordings and R9 battery | Cursor |
-| Integration of the English delivery and diagnosis of the R9 order failure (lockout from earlier recordings) | Claude Code |
-| E3–E3f — humanized store tone (`commerce-privacy-v10`): style rules, warm fixed messages, lighter citations, fixes after each review round | Cursor |
-| V3–V3f — independent read-only reviews of the tone work (six rounds; rejected attempts became regression tests; final approval) | OpenAI Codex |
-| E4 — configurable reasoning effort and live latency/quality comparison (`low` shipped) | Cursor |
-| T1 — deterministic triage menu before the agent | OpenAI Codex (implementation) and Cursor (completion after a usage limit, smoke test) |
-| RT1 — independent read-only review of T1 and E4 | Cursor |
-| T2 — triage UX fixes from the owner's browser test (no menu after a first-contact question, menu digits only right after the menu, purchase intent to sales) | Cursor (implementation); Claude Code (review and live re-check) |
-| Coordination of the tone, latency and triage work, decisions after each review, and integration | Claude Code |
-| D2 — README core-first reframe (documentation only) | Cursor (Orca worker) |
+| Workstream | Tool | Monitoring, tool calls and debugging (owner) |
+|---|---|---|
+| B — infrastructure | Orca, Hermes and Cursor | Cursor |
+| C — RAG | Claude Code and Cursor; the embedding-model choice in PostgreSQL/pgvector is still open | Cursor |
+| D — commerce tools | Claude Code and Cursor; planned channel: WhatsApp | Cursor |
+| E — initial agent implementation | OpenAI Codex | Cursor |
+| F — API (flow validation) | OpenAI Codex | Cursor |
+| R1 — security review | OpenAI Codex | Cursor |
+| E2, E3 — agent fixes | Claude Code | Cursor |
+| F2, F3 — platform fixes | Claude Code | Cursor |
+| R2 — adversarial tests | Claude Code | Cursor |
+| G1 — evaluation | Claude Code | Cursor |
+| R3 — architecture review | OpenAI Codex | Cursor |
+| X1 — example conversations, catalog filtering and stock validation | OpenAI Codex | Cursor |
+| X2 — this README and documentation alignment | OpenAI Codex | Cursor |
+| D1 — complete Docker run | OpenAI Codex | Cursor |
+| L1 — LangChain model layer | OpenAI Codex | Cursor |
+| U1 — browser test interface | OpenAI Codex | Cursor |
+| W1 — welcome message | OpenAI Codex (main implementation) and Cursor (final review, verification and completion) | Cursor |
+| F1 — customer-service flow documentation | Cursor (Composer / Orca worker) | Cursor |
+| R4–R8 — fixes after live-model runs | Claude Code ran the batteries and diagnosed causes; OpenAI Codex implemented the fixes | Cursor |
+| E1 — out-of-scope refusal without handoff, bilingual demo conversations, first English live recordings | OpenAI Codex | Cursor |
+| T — English translation of the documentation and README restructure | OpenAI Codex (README, docs index, service flows, context/evaluation/security docs) and Cursor (process, architecture, ADRs, reviews and test reports) | Cursor |
+| E2 — English-customer fixes (`commerce-privacy-v9`), re-recordings and R9 battery | Cursor | Cursor |
+| Integration of the English delivery and diagnosis of the R9 order failure (lockout from earlier recordings) | Claude Code | Cursor |
+| E3–E3f — humanized store tone (`commerce-privacy-v10`): style rules, warm fixed messages, lighter citations, fixes after each review round | Cursor | Cursor |
+| V3–V3f — independent read-only reviews of the tone work (six rounds; rejected attempts became regression tests; final approval) | OpenAI Codex | Cursor |
+| E4 — configurable reasoning effort and live latency/quality comparison (`low` shipped) | Cursor | Cursor |
+| T1 — deterministic triage menu before the agent | OpenAI Codex (implementation) and Cursor (completion after a usage limit, smoke test) | Cursor |
+| RT1 — independent read-only review of T1 and E4 | Cursor | Cursor |
+| T2 — triage UX fixes from the owner's browser test (no menu after a first-contact question, menu digits only right after the menu, purchase intent to sales) | Cursor (implementation); Claude Code (review and live re-check) | Cursor |
+| Coordination of the tone, latency and triage work, decisions after each review, and integration | Claude Code | Cursor |
+| D2 — README core-first reframe (documentation only) | Cursor (Orca worker) | Cursor |
 
 The workflow was: **contracts → parallel workstreams → independent review (R1) →
 adversarial tests (R2) → evaluation with gates (G1) → fixes by owners (E2/F2, E3/F3) →
