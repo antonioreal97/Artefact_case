@@ -63,6 +63,7 @@ from app.services.privacy import (
     scan_outbound,
 )
 from app.services.privacy_vault import TOKEN_RE, PrivacyVault
+from app.services.triage import TriageConfig, TriageReply, redact_order_step, route_triage
 from app.services.vault_store import VaultStore
 from app.tools.context import ToolCallRecord, ToolContext
 from app.tools.handoff import request_human_handoff
@@ -257,13 +258,38 @@ class ChatService:
             vault = await self.vault_store.load(tenant_id, conversation_id)
         except Exception:
             vault, vault_ok = PrivacyVault(), False
+        triage = TriageConfig.from_extra(agent_settings.extra or {})
+        raw_triage = (agent_settings.extra or {}).get("triage")
+        if triage is None and isinstance(raw_triage, dict) and raw_triage.get("enabled") is True:
+            logger.warning("triage.config_invalid", correlation_id=safe_correlation)
+        prior_assistant = (
+            await session.scalar(
+                select(Message)
+                .where(
+                    Message.tenant_id == tenant_id,
+                    Message.conversation_id == conversation_id,
+                    Message.role == "assistant",
+                )
+                .order_by(Message.created_at.desc(), Message.id.desc())
+                .limit(1)
+            )
+            if triage
+            else None
+        )
+        pending: dict[str, str] = (
+            dict(prior_assistant.meta.get("triage_state", {})) if prior_assistant else {}
+        )
         previous_tokens = set(vault.values)
+        if pending.get("order_token") not in previous_tokens:
+            pending.pop("order_token", None)
         # A customer cannot manufacture references to values stored in an earlier turn.
         redacted = redact_user_text(
             TOKEN_RE.sub("[referência inválida]", text),
             vault,
             known_restricted_values=known_names,
         )
+        if triage:
+            redacted = redact_order_step(redacted, pending, vault)
         # Only values the customer typed in THIS turn may be echoed back (revealed).
         turn_tokens = {m.group() for m in TOKEN_RE.finditer(redacted)}
         restricted = looks_restricted(redacted)
@@ -278,7 +304,7 @@ class ChatService:
         session.add(user_message)
         # Tools use independent sessions, so the conversation FK must be committed first.
         await session.commit()
-        if agent_settings.welcome_message:
+        if agent_settings.welcome_message or triage:
             # Serialize first-contact decisions across API workers without locking the
             # conversation row needed by independently committed handoff tools.
             lock_key = int.from_bytes(conversation_id.bytes[:8], "big", signed=True)
@@ -350,6 +376,30 @@ class ChatService:
         welcome: str | None = None
         welcome_only = False
         configured_welcome = (agent_settings.welcome_message or "").strip()
+        if triage:
+            try:
+                for configured_text in (triage.menu, triage.hours, triage.returns):
+                    # Menu enumeration after "pedido" is navigation, not an order id.
+                    scan_text = (
+                        re.sub(r"(?m)^[1-5]\. ", "", configured_text)
+                        if configured_text == triage.menu
+                        else configured_text
+                    )
+                    scan_outbound(
+                        scan_text,
+                        allowlist=scan_allowlist,
+                        known_restricted_values=known_values,
+                    )
+                    if TOKEN_RE.search(configured_text):
+                        raise PrivacyBoundaryError("Configured triage contains a vault reference")
+            except PrivacyBoundaryError:
+                logger.warning("triage.config_rejected", correlation_id=safe_correlation)
+                triage = None
+                pending = {}
+        if triage:
+            # Validated public menu text also appears verbatim in future model history.
+            scan_allowlist.append(triage.menu)
+            configured_welcome = "\n\n".join(filter(None, [configured_welcome, triage.menu]))
         if (
             first_contact
             and configured_welcome
@@ -373,17 +423,56 @@ class ChatService:
         model_ran = False
         turn_instructions: str | None = None
         provider: ModelProvider | None = None
+        triage_result: TriageReply | None = None
+        next_state: dict[str, str] = {}
+        route = "agent"
+        if triage and vault_ok and not (decision.refusal or decision.reason or restricted):
+            try:
+                if welcome and is_greeting_only(text):
+                    next_state = {"step": "menu"}
+                    route = "triage:menu"
+                else:
+                    async with asyncio.timeout(self.settings.turn_timeout_seconds):
+                        triage_result = await route_triage(
+                            triage,
+                            pending,
+                            text=text,
+                            redacted=redacted,
+                            ctx=ctx,
+                        )
+                    if triage_result:
+                        next_state = triage_result.state
+                        route = triage_result.route
+                    elif welcome:
+                        next_state = {"step": "menu"}
+            except Exception as exc:
+                failure_reason = (
+                    "privacy_guard" if _caused_by_privacy_guard(exc) else "tool_failure"
+                )
         if decision.refusal:
+            route = "safety"
             answer = INJECTION_REFUSAL
         elif restricted:
+            route = "safety"
             # Fail closed: residual address/identity/CPF cues never reach the model.
             answer = PRIVACY_NOTICE
             await handoffs.request("privacy_guard")
         elif decision.reason:
+            route = "safety"
             await handoffs.request(decision.reason)
             answer = HANDOFF_ACK
         elif not vault_ok:
+            route = "safety"  # fail-closed before the model; never report "agent"
             failure_reason = "privacy_guard"
+        elif failure_reason:
+            route = "safety"  # triage step failed before the model ran
+        elif triage_result:
+            answer = triage_result.answer
+            if welcome and triage_result.route == "triage:menu":
+                answer, welcome_only = welcome, True
+            if triage_result.handoff_reason:
+                await handoffs.request(triage_result.handoff_reason)
+                answer = HANDOFF_ACK
         elif welcome and is_greeting_only(text):
             answer = welcome
             welcome_only = True
@@ -440,18 +529,21 @@ class ChatService:
         cited = set(re.findall(r"\[(S\d+)\]", answer))
         selected = [citation for citation in citations if citation.label in cited]
         authorized_tokens = verified_lookup_tokens(ctx.tool_calls)
-        tool_grounded = False
-        if model_ran:
-            # Recoverable tool errors (invalid_input/not_found/not_authorized) keep the answer.
+        tool_grounded = bool(triage_result and triage_result.grounded)
+        if model_ran or triage_result:
             for record in ctx.tool_calls:
                 if record.result_summary.get("locked") is True:
                     failure_reason = "privacy_guard"
-                elif (
-                    failure_reason is None
-                    and record.status == "error"
-                    and record.error_code in _FAILURE_ERRORS
-                ):
-                    failure_reason = "tool_failure"
+                elif record.status == "error" and record.error_code in _FAILURE_ERRORS:
+                    failure_reason = failure_reason or "tool_failure"
+            if triage_result:
+                try:
+                    scan_outbound(
+                        answer, allowlist=scan_allowlist, known_restricted_values=known_values
+                    )
+                except PrivacyBoundaryError:
+                    failure_reason = "privacy_guard"
+        if model_ran:
             cited_chunks = {c.label: c for c in citations}
             documents = [
                 chunk.content
@@ -511,7 +603,7 @@ class ChatService:
             and discusses_sensitive_topic(answer, cited=bool(selected))
         ):
             await handoffs.request("sensitive_topic")
-        grounded = model_ran and failure_reason is None and bool(selected or tool_grounded)
+        grounded = failure_reason is None and bool(selected or tool_grounded)
         try:
             await self.vault_store.save(tenant_id, conversation_id, vault)
         except Exception:
@@ -532,6 +624,7 @@ class ChatService:
             welcome = None
             welcome_only = False
         if handoff_this_turn:
+            next_state = {}
             answer += "\nPassei sua solicitação pra um atendente te ajudar."
             conversation.status = "handoff"
         if footer:
@@ -570,6 +663,7 @@ class ChatService:
                 "handoff": handoff_this_turn,
                 "latency_ms": latency,
                 "prompt_version": PROMPT_VERSION,
+                **({"triage_state": next_state, "route": route} if triage else {}),
             },
         )
         session.add(assistant)
@@ -635,6 +729,7 @@ class ChatService:
             user_message_id=user_message.id,
             message_id=assistant.id,
             reply=revealed,
+            route=route if triage else None,
             welcome_message=welcome if not welcome_only else None,
             sources=[SourceRef(**citation.model_dump()) for citation in selected],
             handoff=HandoffInfo(

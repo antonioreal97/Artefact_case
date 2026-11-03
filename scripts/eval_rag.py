@@ -262,6 +262,11 @@ async def seed_tenants(factory: async_sessionmaker[AsyncSession]) -> dict[str, T
     async with factory() as session:
         # The generated seed API key is discarded: it lives only in the throw-away DB.
         emporio_id, _ = await create_tenant(session)
+        # This corpus measures agent/tool/RAG behavior and captured model egress.
+        # Keep triage opt-out here; its no-model paths have separate integration tests.
+        agent_config = await session.get(AgentSettings, emporio_id)
+        assert agent_config is not None
+        agent_config.extra = {**agent_config.extra, "triage": {"enabled": False}}
         await import_commerce(session, tenant_id=emporio_id, exports=exports)
         await session.commit()
         await ingest_policy(session, tenant_id=emporio_id, data=policy_bytes, filename=policy.name)

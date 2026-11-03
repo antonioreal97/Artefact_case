@@ -35,7 +35,10 @@ flowchart TD
   vaultOk -->|"no"| failPG["SAFE_FALLBACK + privacy_guard"]
   vaultOk --> welcomeGate{"welcome + greeting-only?"}
   welcomeGate -->|"yes"| welOnly["reply = welcome without model"]
-  welcomeGate -->|"no"| agent["Runner + PrivacyGuardedModel"]
+  welcomeGate -->|"no"| triage{"Configured triage matches?"}
+  triage -->|"yes"| fixed["Python reply / verified lookup / handoff"]
+  fixed --> reveal
+  triage -->|"no"| agent["Runner + PrivacyGuardedModel"]
   agent -->|"timeout/error"| failTool["SAFE_FALLBACK + tool_failure/privacy_guard"]
   agent --> outVal{"output_violation"}
   outVal -->|"violation"| failLow["SAFE_FALLBACK + low_confidence"]
@@ -350,3 +353,41 @@ Honest limits aligned with the [README limitations](../README.md#limitations-and
 | RAG | `retrieval.retrieve`; `search_knowledge` |
 | Privacy / model | `redact_user_text`, `scan_outbound`; `PrivacyGuardedModel` |
 | Contract | `ChatReply`; `HANDOFF_REASONS`; `docs/platform/contracts.md` |
+
+
+## Deterministic triage
+
+After authentication, rate limits and the existing input safety checks, configured tenants
+use a Python router before the agent. First-contact greetings receive welcome + menu without
+a model; first-contact questions receive that welcome and their normal routed answer.
+
+| Input/state | Action | Next state |
+|---|---|---|
+| `menu`, `0`, `cancelar`, `cancela` | Show configured menu | Menu pending; discard pending order |
+| Menu pending: `1`; simple hours/address/contact shortcut | Configured public hours, address, phone and email | No pending choice |
+| Menu pending: `2`; order-status shortcut | Ask order number, then purchase email/phone; accept both together | Order pending until verified |
+| Menu pending: `3`; simple return-policy shortcut | Configured §4.1 summary and source footer | Next free text goes to agent |
+| Menu pending: `4`; generic product/price/stock shortcut | Ask what the customer wants | Next free text goes to agent |
+| Menu pending: `5`; explicit human request | Existing `customer_request` handoff and acknowledgement | Clear state |
+| Other free text during order guide | Cancel guide and run agent; a recognized shortcut can switch flow | Clear state |
+| Number outside menu | Agent, except a guided order number | No implicit menu choice |
+
+During the order guide, token-only order/contact replies and a small set of field labels
+continue the guide. A question with other words cancels it, even if it contains a contact.
+Bare numbers are order IDs only during this step, so `1` there means order 1, not option 1.
+The step and opaque order token live in the latest assistant `Message.metadata.triage_state`;
+messages already provide durable, tenant/conversation-scoped history. Raw contacts are never
+added to metadata. Expired vault references cause the router to ask for the order again.
+User `content` retains the existing local raw-message behavior; redacted history and tool
+traces contain tokens. The shared lookup enforces identity, attempt limits and audits;
+tracking/date reveal uses the same authorized-token set as the agent. Lockout receives the
+existing privacy-guard fallback and persisted handoff.
+
+Static hours/returns have `grounded=false`, no retrieval and no tools. Their footer is
+operator-maintained provenance, not a RAG citation. Verified lookup has `grounded=true` and
+`tools_used=["lookup_order"]`. The original RAG evaluation corpus explicitly opts out of
+triage so its model-egress and retrieval gates remain meaningful; triage is covered by
+`tests/agent/test_triage.py`, the generated demos, and HTTP smoke verification.
+
+Both WhatsApp and `/chat` call the same ChatService. The UI already renders text with
+`white-space: pre-wrap` and the webhook sends the menu's newline-delimited text unchanged.

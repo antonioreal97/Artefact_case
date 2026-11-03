@@ -27,7 +27,7 @@ Its configured tone is informal, professional and welcoming: “Sua música come
 
 1. Authenticate the request, identify the store and load or create the conversation.
 2. Classify the message locally, tokenize recognized personal data, and apply input guardrails; restricted requests and human-service requests can be handled before the model runs.
-3. Run one bounded agent loop: typed commerce tools supply catalog, price, stock and verified order facts; document retrieval supplies policy excerpts and citations.
+3. Resolve configured triage choices locally; unmatched messages and specific follow-ups run one bounded agent loop: typed commerce tools supply catalog, price, stock and verified order facts; document retrieval supplies policy excerpts and citations.
 4. Check the answer for unsupported prices, stock, commercial claims and citations, and scan it for restricted data.
 5. Reveal only authorized tokens locally; use a safe fallback or persist a human handoff request when the evidence or safety checks require it.
 6. Return and persist the reply, sources and tool evidence; include the configured welcome message on first contact when appropriate.
@@ -35,6 +35,21 @@ Its configured tone is informal, professional and welcoming: “Sua música come
 See the [customer-service flows](docs/customer-service-flows.md) for intent diagrams, guardrails and handoff reasons.
 The demonstrated path is one store, one API and deterministic providers. The backend queries a snapshot imported from CSVs, rather than a live ERP.
 Tests verify integration and the controls exercised, rather than LLM naturalness or quality. A manual battery with `gpt-5-mini` and `text-embedding-3-small` ran on 2026-11-01 (see [live-model validation](#live-model-validation)); it is not a statistical evaluation.
+
+## Triage menu
+
+Empório's first-contact welcome includes a numbered menu. Customers can choose a number,
+use a shortcut such as `horário` or `endereço`, or write normally. `menu` and `0` reopen it.
+Python answers hours/contact and the short online-return policy, guides verified order
+lookup, and creates human handoffs without model calls. Product details, prices, stock,
+and specific policy questions go to the agent. This keeps routine turns quick and avoids
+model costs while letting customers move naturally into free text.
+
+Triage is opt-in through `AgentSettings.extra.triage`; new Empório seeds enable it.
+Existing tenants keep their configuration. To explicitly enable/reset the Empório defaults,
+run `uv run python -m scripts.create_tenant --refresh-triage`. Pending steps persist in
+assistant-message metadata; no migration is needed. See the [routing table](docs/customer-service-flows.md#deterministic-triage)
+and [contract](docs/platform/contracts.md#t1--deterministic-triage).
 
 ## Case requirements → where they are met
 
@@ -522,7 +537,9 @@ pipeline and queries against the local snapshot:
 5. [Out-of-scope question and store address](examples/conversations/05-out-of-scope-and-address.md): a polite refusal without human handoff for the out-of-scope question, as required by policy.
 
 The verified order and return-policy application cover nontrivial situations.
-Conversation artifacts must not publish customer identifiers.
+Conversation artifacts must not publish customer identifiers. The generator rejects unknown
+English translations; tests regenerate all five files twice and compare them except for the date.
+Examples 04 and 05 include deterministic order-status and public-contact triage.
 Regenerate the examples with Postgres available:
 
 ```bash
@@ -535,7 +552,7 @@ attempt 3; earlier attempts archived). Attempts 1–2 of the order conversation 
 because the deliberate wrong-contact turns of earlier recordings had locked order 1 (three
 failed verifications in one hour), which is the lockout control working as designed. They are nondeterministic observations—not automated
 quality gates—and remain separate from the reproducible offline demonstrations. See
-[examples/conversations/README.md](examples/conversations/README.md) for what worked, what
+[live conversation notes](evals/live/english-conversations/README.md) for what worked, what
 failed and remaining multilingual limits.
 
 ## Tests and evaluation

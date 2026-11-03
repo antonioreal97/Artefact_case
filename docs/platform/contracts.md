@@ -85,3 +85,27 @@ The welcome is stored as an assistant `Message` with `metadata.kind="welcome"` a
 identical public `content`/`content_redacted`, available in subsequent model context.
 For a question it precedes the answer; `ChatReply.message_id` still identifies the
 answer. For a greeting it is the single assistant message and that ID is returned.
+
+
+### T1 – Deterministic triage
+
+`ChatReply.route: str | None = None` is additive: `triage:menu`, `triage:hours`,
+`triage:order`, `triage:returns`, `triage:products`, `triage:human`, `agent`, or `safety`.
+It is null for tenants without valid triage configuration. `welcome_message` keeps W1's
+rendering semantics and includes the menu for enabled tenants. Static replies have no
+`tools_used`, no `sources`, `retrieved_chunks=0`, and `grounded=false`; the returns footer
+is configured provenance, not a retrieved citation. Order lookup lists `lookup_order`
+and is grounded only after successful identity verification. Handoff fields and tool
+errors retain their existing meanings, including privacy-guard handoff on lockout.
+
+Opt-in configuration is `AgentSettings.extra.triage`: `enabled=true`, and nonempty string
+fields `menu`, `hours`, `address`, `phone`, `email`, `returns`. Contact values must also
+pass the tenant's public-contact allowlist. Invalid or unsafe configuration disables
+triage; existing behavior applies. New Empório seeds supply defaults from manual §1.2/§2
+and §4.1; `create_tenant --refresh-triage` explicitly refreshes existing Empório settings
+while preserving unrelated extra fields. Merely rerunning the seed does not opt in old tenants.
+
+The latest assistant message's `metadata.triage_state` stores `{step: menu|order|agent_next}`
+and, during order verification, an optional `order_token` referencing the existing vault.
+An empty object clears the guide. This uses the existing durable message table and retention
+policy, requiring no schema migration. No new raw personal-data storage is introduced.

@@ -18,7 +18,23 @@ The deterministic model rewrites the query: arrependi → arrependimento, devolv
 
 Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, e sábado das 9h às 13h (domingo e feriado, fechado). Posso te ajudar com instrumentos, preços, estoque, pedidos e nossas políticas.
 
+Como posso te ajudar?
+1. Horário e endereço da loja
+2. Status do meu pedido
+3. Trocas e devoluções
+4. Produtos, preços e estoque
+5. Falar com um atendente
+Responda com o número ou escreva sua dúvida.
+
 > EN: Hi! This is Empório da Música. We're here Monday to Friday, 9 am to 6 pm, and Saturday 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies.
+>
+> How can I help you?
+> 1. Store hours and address
+> 2. My order status
+> 3. Exchanges and returns
+> 4. Products, prices and stock
+> 5. Talk to a staff member
+> Reply with a number or write your question.
 
 **Agent:**
 
@@ -42,6 +58,7 @@ Fonte: Políticas da Loja, §4.1 Direito de Arrependimento (Compras Online) (p. 
 >
 > Source: Store Policies, §4.1 Right to Withdraw (Online Purchases) (p. 4)
 
+- Route: agent.
 - Tools: search_knowledge.
 - Citations: [S1] Store Policies, 4.1 Right to Withdraw (Online Purchases), page 4.
 - Handoff: none.
@@ -75,6 +92,7 @@ Fonte: Políticas da Loja, §4.1 Direito de Arrependimento (Compras Online) (p. 
 >
 > Source: Store Policies, §4.1 Right to Withdraw (Online Purchases) (p. 4)
 
+- Route: agent.
 - Tools: search_knowledge.
 - Citations: [S2] Store Policies, 4.1 Right to Withdraw (Online Purchases), page 4.
 - Handoff: none.

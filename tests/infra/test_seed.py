@@ -261,3 +261,22 @@ async def test_seed_welcome_defaults_and_preserves_operator_value(session, monke
         await create_tenant(session)
         assert config.welcome_message == WELCOME_MESSAGE
         await session.commit()
+
+
+async def test_triage_seed_requires_explicit_refresh(session, monkeypatch):
+    from scripts.create_tenant import TRIAGE_CONFIG
+
+    monkeypatch.setattr("scripts.create_tenant.TENANT_SLUG", f"triage-{uuid.uuid4().hex}")
+    tenant, _ = await create_tenant(session)
+    config = await session.get(AgentSettings, tenant)
+    assert config.extra["triage"] == TRIAGE_CONFIG
+    config.extra = {"operator": "keep", "triage": {"enabled": False}}
+    await session.commit()
+    await create_tenant(session)
+    assert config.extra == {"operator": "keep", "triage": {"enabled": False}}
+    config.extra = {"operator": "keep"}  # Pre-triage tenant: ordinary seed must not opt in.
+    await session.commit()
+    await create_tenant(session)
+    assert config.extra == {"operator": "keep"}
+    await create_tenant(session, refresh_triage=True)
+    assert config.extra == {"operator": "keep", "triage": TRIAGE_CONFIG}
