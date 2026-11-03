@@ -354,6 +354,8 @@ confirmed no `langchain`, `langgraph*` or `langchain-postgres` package. Native O
 Agents SDK, tools, guardrails, vault and retrieval behavior were preserved. Added 49 offline
 regression tests; the README assistant-disclosure row adds one documentation subtest.
 
+Historical L1 checkpoint (superseded; the current suite count is in the root README):
+
 | Command / check | Measured result |
 |---|---|
 | `uv sync --frozen` | exit 0; locked environment reproducible |
