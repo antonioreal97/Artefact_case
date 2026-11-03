@@ -770,6 +770,13 @@ The tools identified per workstream are:
 | T — English translation of the documentation and README restructure | OpenAI Codex (README, docs index, service flows, context/evaluation/security docs) and Cursor (process, architecture, ADRs, reviews and test reports) |
 | E2 — English-customer fixes (`commerce-privacy-v9`), re-recordings and R9 battery | Cursor |
 | Integration of the English delivery and diagnosis of the R9 order failure (lockout from earlier recordings) | Claude Code |
+| E3–E3f — humanized store tone (`commerce-privacy-v10`): style rules, warm fixed messages, lighter citations, fixes after each review round | Cursor |
+| V3–V3f — independent read-only reviews of the tone work (six rounds; rejected attempts became regression tests; final approval) | OpenAI Codex |
+| E4 — configurable reasoning effort and live latency/quality comparison (`low` shipped) | Cursor |
+| T1 — deterministic triage menu before the agent | OpenAI Codex (implementation) and Cursor (completion after a usage limit, smoke test) |
+| RT1 — independent read-only review of T1 and E4 | Cursor |
+| T2 — triage UX fixes from the owner's browser test (no menu after a first-contact question, menu digits only right after the menu, purchase intent to sales) | Cursor (implementation); Claude Code (review and live re-check) |
+| Coordination of the tone, latency and triage work, decisions after each review, and integration | Claude Code |
 
 The workflow was: **contracts → parallel workstreams → independent review (R1) →
 adversarial tests (R2) → evaluation with gates (G1) → fixes by owners (E2/F2, E3/F3) →
