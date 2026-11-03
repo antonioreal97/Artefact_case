@@ -90,13 +90,17 @@ answer. For a greeting it is the single assistant message and that ID is returne
 ### T1 – Deterministic triage
 
 `ChatReply.route: str | None = None` is additive: `triage:menu`, `triage:hours`,
-`triage:order`, `triage:returns`, `triage:products`, `triage:human`, `agent`, or `safety`.
-It is null for tenants without valid triage configuration. `welcome_message` keeps W1's
-rendering semantics and includes the menu for enabled tenants. Static replies have no
+`triage:order`, `triage:returns`, `triage:products`, `triage:human`, `triage:purchase`,
+`agent`, or `safety`. It is null for tenants without valid triage configuration.
+`welcome_message` keeps W1's rendering semantics: greeting-only first contact puts
+welcome + menu in `reply`; a first-contact question puts welcome without the menu in
+`welcome_message` and may end the answer with a short menu hint. Static replies have no
 `tools_used`, no `sources`, `retrieved_chunks=0`, and `grounded=false`; the returns footer
 is configured provenance, not a retrieved citation. Order lookup lists `lookup_order`
-and is grounded only after successful identity verification. Handoff fields and tool
-errors retain their existing meanings, including privacy-guard handoff on lockout.
+and is grounded only after successful identity verification. `triage:purchase` is a
+`customer_request` handoff (same persistence as option 5) with a dedicated warm reply.
+Handoff fields and tool errors retain their existing meanings, including privacy-guard
+handoff on lockout.
 
 Opt-in configuration is `AgentSettings.extra.triage`: `enabled=true`, and nonempty string
 fields `menu`, `hours`, `address`, `phone`, `email`, `returns`. Contact values must also
@@ -107,5 +111,7 @@ while preserving unrelated extra fields. Merely rerunning the seed does not opt 
 
 The latest assistant message's `metadata.triage_state` stores `{step: menu|order|agent_next}`
 and, during order verification, an optional `order_token` referencing the existing vault.
-An empty object clears the guide. This uses the existing durable message table and retention
-policy, requiring no schema migration. No new raw personal-data storage is introduced.
+An empty object clears the guide. Digits are menu choices only while `step=menu` (or during
+a sub-step that expects that input); agent replies persist an empty state so a later digit
+reaches the agent. This uses the existing durable message table and retention policy,
+requiring no schema migration. No new raw personal-data storage is introduced.

@@ -181,7 +181,7 @@ def test_english_scope_prefix_does_not_exempt_claims(extra):
 
 
 def test_prompt_version_and_policy_cover_english_rules():
-    assert PROMPT_VERSION == "commerce-privacy-v10"
+    assert PROMPT_VERSION == "commerce-privacy-v11"
     assert OUT_OF_SCOPE_EN in POLICY_TEXT
     assert "traduza a consulta" in POLICY_TEXT.casefold()
     assert "Nunca ofereça ações sem ferramenta" in POLICY_TEXT

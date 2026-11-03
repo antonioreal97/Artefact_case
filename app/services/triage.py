@@ -21,8 +21,23 @@ MENU = (
     "5. Falar com um atendente\n"
     "Responda com o número ou escreva sua dúvida."
 )
+MENU_HINT = "Se preferir, digite menu para ver as opções."
 ASK_ORDER = "Qual é o número do pedido? Depois, vou pedir o e-mail ou telefone usado na compra."
 PRODUCTS = "Me conta o que você procura, como o instrumento ou modelo."
+PURCHASE_HANDOFF = "Que ótimo! Vou te passar pra nossa equipe finalizar a compra com você."
+# Conservative purchase-intent phrases (folded text). Negations never match.
+_PURCHASE_NEGATION = re.compile(
+    r"\bnao\b.{0,30}\b(?:quero |vou )?(?:comprar|levar|reservar|fechar(?: a)? compra)"
+)
+_PURCHASE_INTENT = re.compile(
+    r"^(?:"
+    r"quero comprar|"
+    r"como faco (?:pra|para) comprar|"
+    r"quero fechar(?: a)? compra|"
+    r"vou levar|"
+    r"(?:quero )?reservar"
+    r")(?:\s+(?:por favor|pfv?|please))?$"
+)
 
 
 @dataclass(frozen=True)
@@ -72,8 +87,18 @@ def redact_order_step(text: str, state: dict[str, str], vault: PrivacyVault) -> 
     return vault.tokenize("ORDER", match[1]) + match[2]
 
 
+def purchase_intent(text: str) -> bool:
+    """True for clear buy/reserve intent; never matches negations like 'não quero comprar'."""
+    value = fold_text(text).strip(" .!?\n")
+    if not value or _PURCHASE_NEGATION.search(value):
+        return False
+    return _PURCHASE_INTENT.fullmatch(value) is not None
+
+
 def _choice(text: str, redacted: str, state: dict[str, str]) -> str | None:
     value = fold_text(text).strip(" .!?\n")
+    # Digits are menu options only while the prior assistant turn left the menu pending
+    # (or a sub-step that expects that input). Agent replies clear that state.
     if state.get("step") == "menu" and value in {"1", "2", "3", "4", "5"}:
         return value
     # Deliberately narrow shortcuts. Questions with qualifications remain agent work.
@@ -118,6 +143,11 @@ async def route_triage(
     value = fold_text(text).strip(" .!?\n")
     if value in {"menu", "0", "cancelar", "cancela"}:
         return TriageReply(config.menu, "triage:menu", {"step": "menu"})
+    # Purchase intent at any point (menu, agent follow-up, order guide): sales handoff.
+    # The agent cannot complete a sale; previously "quero comprar" fell through to the
+    # model, which repeated a price without a current-turn tool and tripped the price rule.
+    if purchase_intent(text):
+        return TriageReply(PURCHASE_HANDOFF, "triage:purchase", handoff_reason="customer_request")
     if state.get("step") == "agent_next":
         return None
     choice = _choice(text, redacted, state)

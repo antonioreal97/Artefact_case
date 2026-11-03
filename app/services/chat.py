@@ -64,7 +64,13 @@ from app.services.privacy import (
     scan_outbound,
 )
 from app.services.privacy_vault import TOKEN_RE, PrivacyVault
-from app.services.triage import TriageConfig, TriageReply, redact_order_step, route_triage
+from app.services.triage import (
+    MENU_HINT,
+    TriageConfig,
+    TriageReply,
+    redact_order_step,
+    route_triage,
+)
 from app.services.vault_store import VaultStore
 from app.tools.context import ToolCallRecord, ToolContext
 from app.tools.handoff import request_human_handoff
@@ -397,13 +403,21 @@ class ChatService:
                 logger.warning("triage.config_rejected", correlation_id=safe_correlation)
                 triage = None
                 pending = {}
+        greeting_only = is_greeting_only(text)
+        # Full menu only on greeting-only first contact and when the customer asks for it.
+        # First-contact questions get the welcome alone; the answer may end with MENU_HINT.
+        menu_welcome = (
+            "\n\n".join(filter(None, [configured_welcome, triage.menu]))
+            if triage
+            else configured_welcome
+        )
         if triage:
             # Validated public menu text also appears verbatim in future model history.
             scan_allowlist.append(triage.menu)
-            configured_welcome = "\n\n".join(filter(None, [configured_welcome, triage.menu]))
+        candidate_welcome = menu_welcome if greeting_only else configured_welcome
         if (
             first_contact
-            and configured_welcome
+            and candidate_welcome
             and vault_ok
             and not (decision.refusal or decision.reason or restricted)
         ):
@@ -411,12 +425,12 @@ class ChatService:
             # to contain customer PII or vault references (including on later turns).
             try:
                 scan_outbound(
-                    configured_welcome,
+                    candidate_welcome,
                     allowlist=scan_allowlist,
                     known_restricted_values=known_values,
                 )
-                if not TOKEN_RE.search(configured_welcome):
-                    welcome = configured_welcome
+                if not TOKEN_RE.search(candidate_welcome):
+                    welcome = candidate_welcome
             except PrivacyBoundaryError:
                 pass
         answer = SAFE_FALLBACK
@@ -429,7 +443,7 @@ class ChatService:
         route = "agent"
         if triage and vault_ok and not (decision.refusal or decision.reason or restricted):
             try:
-                if welcome and is_greeting_only(text):
+                if welcome and greeting_only:
                     next_state = {"step": "menu"}
                     route = "triage:menu"
                 else:
@@ -444,8 +458,7 @@ class ChatService:
                     if triage_result:
                         next_state = triage_result.state
                         route = triage_result.route
-                    elif welcome:
-                        next_state = {"step": "menu"}
+                    # Agent / unmatched free text clears menu pending (no implicit digits).
             except Exception as exc:
                 failure_reason = (
                     "privacy_guard" if _caused_by_privacy_guard(exc) else "tool_failure"
@@ -473,8 +486,9 @@ class ChatService:
                 answer, welcome_only = welcome, True
             if triage_result.handoff_reason:
                 await handoffs.request(triage_result.handoff_reason)
-                answer = HANDOFF_ACK
-        elif welcome and is_greeting_only(text):
+                # Purchase uses a warm sales reply; option 5 keeps the generic ack.
+                answer = triage_result.answer.strip() or HANDOFF_ACK
+        elif welcome and greeting_only:
             answer = welcome
             welcome_only = True
         else:
@@ -635,6 +649,16 @@ class ChatService:
             next_state = {}
             answer += "\nPassei sua solicitação pra um atendente te ajudar."
             conversation.status = "handoff"
+        elif (
+            first_contact
+            and triage
+            and welcome
+            and not welcome_only
+            and not greeting_only
+            and MENU_HINT not in answer
+        ):
+            # Question on first contact: no full menu; one short reopen hint instead.
+            answer = f"{answer.rstrip()}\n{MENU_HINT}"
         if footer:
             answer += "\n\n" + footer
         # Reveal only what the customer typed this turn or a verified lookup produced now;

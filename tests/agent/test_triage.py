@@ -8,7 +8,15 @@ from structlog.testing import capture_logs
 
 from app.agents.guardrails import INJECTION_REFUSAL, PRIVACY_NOTICE, SAFE_FALLBACK
 from app.models import AgentSettings, AuditEvent, Message, ToolExecution
-from app.services.triage import ASK_ORDER, MENU, PRODUCTS, TriageConfig
+from app.services.triage import (
+    ASK_ORDER,
+    MENU,
+    MENU_HINT,
+    PRODUCTS,
+    PURCHASE_HANDOFF,
+    TriageConfig,
+    purchase_intent,
+)
 from scripts.create_tenant import PUBLIC_CONTACT_VALUES, TRIAGE_CONFIG, WELCOME_MESSAGE
 from tests.agent.test_chat import commerce as commerce_fixture
 from tests.agent.test_chat import make_service, turn
@@ -42,6 +50,18 @@ async def test_first_greeting_menu_and_restart_state(session_factory, session, t
     assert hours.reply == TriageConfig.from_extra({"triage": TRIAGE_CONFIG}).hours
     assert not hours.sources and not hours.tools_used
     stored = await session.get(Message, hours.message_id)
+    assert stored.meta["triage_state"] == {}
+
+
+async def test_first_contact_question_skips_menu(session_factory, session, triage_tenant):
+    service, model = make_service(session_factory)
+    reply = await turn(service, session, triage_tenant, "Qual o preço do Violão Aurora?")
+    assert model.calls and reply.route == "agent" and reply.grounded
+    assert reply.welcome_message == WELCOME_MESSAGE
+    assert MENU not in (reply.welcome_message or "")
+    assert MENU not in reply.reply
+    assert reply.reply.rstrip().endswith(MENU_HINT)
+    stored = await session.get(Message, reply.message_id)
     assert stored.meta["triage_state"] == {}
 
 
@@ -81,7 +101,9 @@ async def test_shortcuts(session_factory, session, triage_tenant, text, route):
     reply = await turn(service, session, triage_tenant, text)
     assert reply.route == route and not model.calls
     if route == "triage:hours":
-        assert MENU in reply.welcome_message
+        assert reply.welcome_message == WELCOME_MESSAGE
+        assert MENU not in reply.welcome_message
+        assert reply.reply.rstrip().endswith(MENU_HINT)
 
 
 @pytest.mark.parametrize(
@@ -92,7 +114,67 @@ async def test_nonmatches_reach_agent(session_factory, session, triage_tenant, t
     reply = await turn(service, session, triage_tenant, text)
     assert model.calls and reply.route == "agent"
     if not reply.handoff:
-        assert MENU in reply.welcome_message
+        assert reply.welcome_message == WELCOME_MESSAGE
+        assert MENU not in reply.welcome_message
+        assert reply.reply.rstrip().endswith(MENU_HINT)
+
+
+async def test_digit_after_agent_goes_to_agent(session_factory, session, triage_tenant):
+    """After an agent product list, '4' is not menu option 4 (likely the 4th item)."""
+    service, model = make_service(session_factory)
+    first = await turn(service, session, triage_tenant, "Qual o preço do Violão Aurora?")
+    assert first.route == "agent" and first.grounded
+    stored = await session.get(Message, first.message_id)
+    assert stored.meta["triage_state"] == {}
+    before = len(model.calls)
+    second = await turn(service, session, triage_tenant, "4", first.conversation_id)
+    assert second.route == "agent" and len(model.calls) > before
+    assert second.reply != PRODUCTS
+
+
+async def test_digit_right_after_menu_is_option(session_factory, session, triage_tenant):
+    service, model = make_service(session_factory)
+    menu = await turn(service, session, triage_tenant, "menu")
+    reply = await turn(service, session, triage_tenant, "4", menu.conversation_id)
+    assert reply.route == "triage:products" and reply.reply == PRODUCTS
+    assert not model.calls
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "quero comprar",
+        "Quero Comprar!",
+        "como faço pra comprar",
+        "como faço para comprar",
+        "quero fechar a compra",
+        "vou levar",
+        "reservar",
+        "quero reservar",
+    ],
+)
+async def test_purchase_intent_sales_handoff(session_factory, session, triage_tenant, text):
+    service, model = make_service(session_factory)
+    # Mid-conversation, after an agent turn (not only after the menu).
+    start = await turn(service, session, triage_tenant, "Qual o preço do Violão Aurora?")
+    before = len(model.calls)
+    reply = await turn(service, session, triage_tenant, text, start.conversation_id)
+    assert reply.route == "triage:purchase"
+    assert reply.handoff.reason == "customer_request"
+    assert reply.tools_used == ["request_human_handoff"]
+    assert PURCHASE_HANDOFF in reply.reply
+    assert len(model.calls) == before
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["não quero comprar", "nao quero comprar", "não vou levar", "preço de compra"],
+)
+async def test_purchase_nonmatches_reach_agent(session_factory, session, triage_tenant, text):
+    assert not purchase_intent(text)
+    service, model = make_service(session_factory)
+    reply = await turn(service, session, triage_tenant, text)
+    assert model.calls and reply.route == "agent"
 
 
 @pytest.mark.parametrize("choice", ["3", "4"])

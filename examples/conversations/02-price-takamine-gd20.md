@@ -16,29 +16,15 @@ Execution: real ChatService, CSV catalog and Empório da Música seed policies, 
 
 Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, e sábado das 9h às 13h (domingo e feriado, fechado). Posso te ajudar com instrumentos, preços, estoque, pedidos e nossas políticas.
 
-Como posso te ajudar?
-1. Horário e endereço da loja
-2. Status do meu pedido
-3. Trocas e devoluções
-4. Produtos, preços e estoque
-5. Falar com um atendente
-Responda com o número ou escreva sua dúvida.
-
 > EN: Hi! This is Empório da Música. We're here Monday to Friday, 9 am to 6 pm, and Saturday 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies.
->
-> How can I help you?
-> 1. Store hours and address
-> 2. My order status
-> 3. Exchanges and returns
-> 4. Products, prices and stock
-> 5. Talk to a staff member
-> Reply with a number or write your question.
 
 **Agent:**
 
 Takamine GD20 Dreadnought Natural: R$ 2.199,00.
+Se preferir, digite menu para ver as opções.
 
 > EN: Takamine GD20 Dreadnought Natural: R$ 2.199,00.
+> If you prefer, type menu to see the options.
 
 - Route: agent.
 - Tools: search_products.

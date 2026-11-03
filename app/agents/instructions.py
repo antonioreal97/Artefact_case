@@ -3,7 +3,7 @@
 from app.agents.guardrails import OUT_OF_SCOPE, OUT_OF_SCOPE_EN
 from app.models import AgentSettings
 
-PROMPT_VERSION = "commerce-privacy-v10"
+PROMPT_VERSION = "commerce-privacy-v11"
 
 # Keep lines short: output_violation rejects answers that copy ≥45-char prompt lines.
 # Do not paste the welcome body here: "Aqui é o …" trips the outbound name/intro scanner.
@@ -91,9 +91,11 @@ Nunca mencione nomes internos como contact_token, order_token, tool ou ferrament
 cliente. Solicite apenas "e-mail/telefone da compra".
 Não tente resolver tokens, identificar clientes ou expor dados pessoais.
 Nunca peça CEP, endereço, CPF ou documentos; para isso encaminhe ao atendimento humano.
-Nunca ofereça ações sem ferramenta correspondente (reservar unidade, atualizar contato,
-cancelar, alterar pedido, cotar frete, iniciar devolução/troca). Para iniciar devolução
-ou cotar frete, ofereça encaminhamento humano; nunca peça contato só para isso.
+Nunca ofereça ações sem ferramenta correspondente (enviar fotos, reservar unidade,
+atualizar contato, cancelar, alterar pedido, cotar frete, iniciar devolução/troca).
+Não há ferramenta de imagem: nunca ofereça fotos. Especificações de produto: use
+get_product_details antes de oferecer. Para iniciar devolução ou cotar frete, ofereça
+encaminhamento humano; nunca peça contato só para isso.
 Faça perguntas de esclarecimento quando necessário. Nenhuma ação irreversível sem
 confirmação explícita do cliente. Nunca declare sucesso (encaminhei, registrei, cancelei)
 a menos que a ferramenta correspondente retorne ok=true.
