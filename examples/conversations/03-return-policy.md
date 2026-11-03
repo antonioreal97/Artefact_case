@@ -2,7 +2,7 @@
 
 Mode: deterministic fake model + hash embeddings; not a real LLM.
 Command: `uv run python -m scripts.demo_conversations`
-Date (UTC): 2026-11-02
+Date (UTC): 2026-11-03
 
 Execution: real ChatService, CSV catalog and Empório da Música seed policies, disposable database; queries use the local snapshot, not a live ERP.
 
@@ -16,9 +16,9 @@ The deterministic model rewrites the query: arrependi → arrependimento, devolv
 
 **Agent (welcome):**
 
-Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. Como posso ajudar?
+Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, e sábado das 9h às 13h (domingo e feriado, fechado). Posso te ajudar com instrumentos, preços, estoque, pedidos e nossas políticas.
 
-> EN: Hello! Welcome to Empório da Música — your music starts here! Our service hours are Monday to Friday, 9 am to 6 pm, and Saturday, 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies. How can I help?
+> EN: Hi! This is Empório da Música. We're here Monday to Friday, 9 am to 6 pm, and Saturday 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies.
 
 **Agent:**
 
@@ -30,8 +30,7 @@ acessórios e manuais.
 • O reembolso será realizado na mesma forma de pagamento original em até 10 dias úteis.
 • O frete de devolução é por conta da loja em caso de arrependimento. [S1]
 
-Fontes:
-[S1] Políticas da Loja — §4.1 Direito de Arrependimento (Compras Online), p. 4
+Fonte: Políticas da Loja, §4.1 Direito de Arrependimento (Compras Online) (p. 4)
 
 > EN: 4.1 Right to Withdraw (Online Purchases)
 > • The customer can request a return within 7 (seven) calendar days of receiving the
@@ -41,8 +40,7 @@ Fontes:
 > • The refund will use the original payment method within 10 business days.
 > • The store pays return shipping for change-of-mind returns. [S1]
 >
-> Sources:
-> [S1] Store Policies — §4.1 Right to Withdraw (Online Purchases), p. 4
+> Source: Store Policies, §4.1 Right to Withdraw (Online Purchases) (p. 4)
 
 - Tools: search_knowledge.
 - Citations: [S1] Store Policies, 4.1 Right to Withdraw (Online Purchases), page 4.
@@ -65,8 +63,7 @@ acessórios e manuais.
 • O reembolso será realizado na mesma forma de pagamento original em até 10 dias úteis.
 • O frete de devolução é por conta da loja em caso de arrependimento. [S2]
 
-Fontes:
-[S2] Políticas da Loja — §4.1 Direito de Arrependimento (Compras Online), p. 4
+Fonte: Políticas da Loja, §4.1 Direito de Arrependimento (Compras Online) (p. 4)
 
 > EN: 4.1 Right to Withdraw (Online Purchases)
 > • The customer can request a return within 7 (seven) calendar days of receiving the
@@ -76,8 +73,7 @@ Fontes:
 > • The refund will use the original payment method within 10 business days.
 > • The store pays return shipping for change-of-mind returns. [S2]
 >
-> Sources:
-> [S2] Store Policies — §4.1 Right to Withdraw (Online Purchases), p. 4
+> Source: Store Policies, §4.1 Right to Withdraw (Online Purchases) (p. 4)
 
 - Tools: search_knowledge.
 - Citations: [S2] Store Policies, 4.1 Right to Withdraw (Online Purchases), page 4.

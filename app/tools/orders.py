@@ -47,12 +47,12 @@ _KNOWN_STATUSES: frozenset[str] = frozenset(
 AUDIT_EVENT_TYPE = "order.verification_failed"
 
 MSG_NOT_AUTHORIZED = (
-    "Não foi possível confirmar os dados do pedido. Verifique o número do pedido e o "
-    "e-mail ou telefone usado na compra."
+    "Não consegui confirmar os dados do pedido. Confere o número e o e-mail ou telefone "
+    "usado na compra?"
 )
 MSG_LOCKED = (
-    "Por segurança, não posso consultar este pedido agora, após várias tentativas sem "
-    "confirmação. Posso encaminhar você para um atendente humano."
+    "Por segurança, não consigo consultar este pedido agora depois de várias tentativas "
+    "sem confirmação. Posso te passar pra um atendente humano."
 )
 MSG_BAD_ORDER_REF = "Não consegui identificar o número do pedido. Pode informá-lo novamente?"
 MSG_BAD_CONTACT = (

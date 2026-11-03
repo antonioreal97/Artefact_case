@@ -167,7 +167,7 @@ async def test_no_tool_answers_through_chat(session_factory, two_tenants, questi
 
 
 def test_prompt_uses_customer_language_and_includes_configured_tagline():
-    assert PROMPT_VERSION == "commerce-privacy-v9"
+    assert PROMPT_VERSION == "commerce-privacy-v10"
     assert "Nunca mencione nomes internos como contact_token, order_token, tool" in POLICY_TEXT
     assert 'Solicite apenas "e-mail/telefone da compra"' in POLICY_TEXT
     config = AgentSettings(assistant_name="Assistente", extra={"tagline": "Desde 2002."})

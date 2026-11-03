@@ -51,7 +51,13 @@ DISCLAIMER = (
 )
 LIVE_NOTE = "Live mode: OpenAI chat + embedding providers (results are non-deterministic)."
 # Phrases that count as an explicit "I could not find it" answer.
-NO_ANSWER_MARKERS = ("não encontrei", "nao encontrei", "não consegui confirmar")
+NO_ANSWER_MARKERS = (
+    "não encontrei",
+    "nao encontrei",
+    "não achei",
+    "nao achei",
+    "não consegui confirmar",
+)
 # Independent egress patterns (the gateway has its own; the eval must not grade itself).
 EGRESS_PATTERNS = {
     "email": re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"),

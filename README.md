@@ -475,7 +475,7 @@ the page does not detect whether that provider is fake/hash or a real model.
 | Document-only RAG | Policies, FAQ and manuals require excerpts and references; the seed includes the store PDF. Embeddings do not replace identity checks. |
 | Hybrid retrieval + RRF | pgvector/cosine captures similarity and Portuguese full-text search captures exact terms; Reciprocal Rank Fusion combines ranks without adding incompatible scales. Superiority over lexical search has not been measured. |
 | Sufficiency before answering | Similarity thresholds and lexical coverage withhold insufficient sources; SQL queries filter tenant, active document and current version. This is a relevance heuristic, not proof of a complete answer. |
-| Versioned prompt | `commerce-privacy-v9` combines a configurable persona with mandatory rules; documents arrive in `<untrusted_document>` as untrusted data. Guardrails and authorization remain in code. |
+| Versioned prompt | `commerce-privacy-v10` combines a configurable persona with mandatory rules plus an ESTILO block (WhatsApp-like Empório tone: answer first, short, no greeting loops, light citations; prompt-only, so live replies still sometimes use em dashes, long policy answers or a templated closing question); documents arrive in `<untrusted_document>` as untrusted data. Guardrails and authorization remain in code. Per-turn welcome notes are validated against the same instruction string the model sees (truthful “welcome already sent”, no assumed hours). Unbacked handoff claims are rejected in code. The rule against offering a return start or freight quote (route those to a human) is prompt-only; no output filter enforces it. Money validation is unchanged from `main`: amounts are read from digits only, and a customer budget is exempt only when written in digits. |
 | Validated CSVs + vault | Types, references and uniqueness are validated; import uses per-tenant upsert. Restricted data stays local; recognized spans become reversible tokens resolved by local tools. This is pseudonymization, not anonymization. |
 | Persisted history | Postgres stores conversations, original and redacted messages, sources and tool executions; only the redacted form goes to the model. Redis stores the vault with a sliding 24-hour TTL. |
 
@@ -597,6 +597,7 @@ model is nondeterministic.
 | R8, native adapter | 19 |
 | R8, LangChain (`openai:gpt-5-mini`) | 22 |
 | R9, native adapter (`commerce-privacy-v9`) | 24 |
+| R10, native adapter (`commerce-privacy-v10`, humanized tone) | 24 |
 
 In every run, “quero falar com um atendente” (“I want to speak to a representative”)
 was correctly handed off. The first run showed that the privacy filter itself blocked
@@ -617,7 +618,8 @@ Anthropic and Ollama were not run.
 ## Limitations and next steps
 
 - **Quality and grounding (A-2/A-4, O-4):** the Portuguese live battery reached 24/27
-  useful answers on R9 native after the English-customer fixes, with earlier rounds
+  useful answers on R9 native after the English-customer fixes and again on R10 native
+  after the humanized-tone changes, with earlier rounds
   between 19 and 23; evaluation with held-out questions, more multi-turn conversations
   and conflicting sources is still missing. Output rules are lexical: they reduce
   fabrication but also reject correct answers. A citation or product name does not prove
@@ -632,9 +634,16 @@ Anthropic and Ollama were not run.
   three wrong contacts lock the order for an hour for everyone, including the real customer,
   so anyone who knows an order number can trigger it (next step: key the lockout to the
   actor and alert instead of blocking the order); catalog breadth and
-  retrieval still vary by phrasing; unsupported actions are discouraged in policy but not
-  mechanically blocked beyond existing success-claim checks. Broader multilingual evaluation
-  is still open.
+  retrieval still vary by phrasing; offers of tool-less actions (starting a return, quoting
+  freight) are prompt-only, enforced only by the success-claim check when the model claims
+  the action happened. Broader multilingual evaluation is still open.
+- **Money written in words:** price validation reads digits only (as on `main`). A budget
+  written in words ("até mil reais") is not exempt, so an answer that repeats it as
+  "até R$1.000" falls back to a human; a price written only in words ("custa mil reais")
+  is not checked at all, and "mil e 500 reais" in a document is read as R$500. These cases
+  are `xfail` tests in `tests/agent/test_humanized_tone_review_fixes.py`. I tried a
+  number-word parser on this branch, but each review round found a new false-price bypass,
+  so I reverted to `main`'s behavior and kept the limitation documented.
 - **Privacy (A-3, O-9):** unknown lowercase names and contextual identifiers may
   escape the rules. Tokens enable linkage within a conversation. I would restrict
   the external boundary to structured public/abstract inputs and keep ambiguous text

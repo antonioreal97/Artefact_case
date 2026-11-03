@@ -2,7 +2,7 @@
 
 Mode: deterministic fake model + hash embeddings; not a real LLM.
 Command: `uv run python -m scripts.demo_conversations`
-Date (UTC): 2026-11-02
+Date (UTC): 2026-11-03
 
 Execution: real ChatService, CSV catalog and Empório da Música seed policies, disposable database; queries use the local snapshot, not a live ERP.
 
@@ -16,15 +16,15 @@ Seed data is fictitious. Personal inputs are omitted from this example; only the
 
 **Agent (welcome):**
 
-Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. Como posso ajudar?
+Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, e sábado das 9h às 13h (domingo e feriado, fechado). Posso te ajudar com instrumentos, preços, estoque, pedidos e nossas políticas.
 
-> EN: Hello! Welcome to Empório da Música — your music starts here! Our service hours are Monday to Friday, 9 am to 6 pm, and Saturday, 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies. How can I help?
+> EN: Hi! This is Empório da Música. We're here Monday to Friday, 9 am to 6 pm, and Saturday 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies.
 
 **Agent:**
 
-Não foi possível confirmar os dados do pedido. Verifique o número do pedido e o e-mail ou telefone usado na compra.
+Não consegui confirmar os dados do pedido. Confere o número e o e-mail ou telefone usado na compra?
 
-> EN: The order details could not be verified. Check the order number and the email or phone number used for the purchase.
+> EN: I couldn't confirm the order details. Can you check the order number and the email or phone used for the purchase?
 
 - Tools: lookup_order.
 - Citations: none.
