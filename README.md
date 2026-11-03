@@ -31,6 +31,7 @@ Core code: `app/agents/`, `app/tools/`, `app/rag/`, `app/services/chat.py`.
    `./scripts/docker_up.sh` to re-index with real embeddings (this deletes the demo data and
    makes billable calls). Details: [Real model](docs/running.md#real-model-mode-optional).
    Then open `http://127.0.0.1:8000/chat` or use the curl example in Quick start.
+   In the `/chat` access field, paste the `SEED_API_KEY` that `docker_up.sh` wrote to `.env`.
 3. **Read, in this order:** the [five interaction examples](examples/conversations/),
    the [customer-service flows](docs/customer-service-flows.md) and the
    [technical decisions](#technical-decisions).
