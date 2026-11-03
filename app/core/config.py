@@ -6,7 +6,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     openai_api_key: SecretStr | None = None
     openai_chat_model: str = "gpt-5-mini"
+    # Native OpenAI adapter only (LangChain/fake ignore it). Empty = provider default.
+    # "low" measured ~20% faster (p50 9.3 s vs 11.8 s) with 23/27 vs 24/27 useful answers (D-37).
+    openai_reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = "low"
     openai_embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536  # fixed by the migration's vector column
     model_timeout_seconds: float = Field(default=30.0, gt=0, le=300, allow_inf_nan=False)
@@ -80,6 +83,11 @@ class Settings(BaseSettings):
     whatsapp_app_secret: SecretStr | None = None
     whatsapp_access_token: SecretStr | None = None
     whatsapp_graph_api_base: str = "https://graph.facebook.com/v21.0"
+
+    @field_validator("openai_reasoning_effort", mode="before")
+    @classmethod
+    def _empty_effort_is_default(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     @model_validator(mode="after")
     def _guard_prod(self) -> Settings:
