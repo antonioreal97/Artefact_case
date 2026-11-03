@@ -18,29 +18,15 @@ Order status uses deterministic triage and the existing verified lookup tool. Se
 
 Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, e sábado das 9h às 13h (domingo e feriado, fechado). Posso te ajudar com instrumentos, preços, estoque, pedidos e nossas políticas.
 
-Como posso te ajudar?
-1. Horário e endereço da loja
-2. Status do meu pedido
-3. Trocas e devoluções
-4. Produtos, preços e estoque
-5. Falar com um atendente
-Responda com o número ou escreva sua dúvida.
-
 > EN: Hi! This is Empório da Música. We're here Monday to Friday, 9 am to 6 pm, and Saturday 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies.
->
-> How can I help you?
-> 1. Store hours and address
-> 2. My order status
-> 3. Exchanges and returns
-> 4. Products, prices and stock
-> 5. Talk to a staff member
-> Reply with a number or write your question.
 
 **Agent:**
 
 Não consegui confirmar os dados do pedido. Confere o número e o e-mail ou telefone usado na compra?
+Se preferir, digite menu para ver as opções.
 
 > EN: I couldn't confirm the order details. Can you check the order number and the email or phone used for the purchase?
+> If you prefer, type menu to see the options.
 
 - Route: triage:order.
 - Tools: lookup_order.

@@ -38,12 +38,16 @@ Tests verify integration and the controls exercised, rather than LLM naturalness
 
 ## Triage menu
 
-Empório's first-contact welcome includes a numbered menu. Customers can choose a number,
-use a shortcut such as `horário` or `endereço`, or write normally. `menu` and `0` reopen it.
+Empório greeting-only first contact includes a numbered menu. A first-contact question gets
+the welcome without the menu, the normal answer, and a short hint to type `menu`. Digits are
+menu choices only while the previous assistant turn left the menu (or an expecting sub-step)
+pending; any agent reply clears that state so `4` after a product list reaches the agent.
+Clear purchase intent (`quero comprar`, `vou levar`, …) hands off to sales immediately
+(`triage:purchase`) because the agent cannot complete a sale. Customers can also use shortcuts
+such as `horário` or `endereço`, or write normally; `menu` and `0` reopen the full menu.
 Python answers hours/contact and the short online-return policy, guides verified order
 lookup, and creates human handoffs without model calls. Product details, prices, stock,
-and specific policy questions go to the agent. This keeps routine turns quick and avoids
-model costs while letting customers move naturally into free text.
+and specific policy questions go to the agent.
 
 Triage is opt-in through `AgentSettings.extra.triage`; new Empório seeds enable it.
 Existing tenants keep their configuration. To explicitly enable/reset the Empório defaults,
@@ -497,7 +501,7 @@ the page does not detect whether that provider is fake/hash or a real model.
 | Document-only RAG | Policies, FAQ and manuals require excerpts and references; the seed includes the store PDF. Embeddings do not replace identity checks. |
 | Hybrid retrieval + RRF | pgvector/cosine captures similarity and Portuguese full-text search captures exact terms; Reciprocal Rank Fusion combines ranks without adding incompatible scales. Superiority over lexical search has not been measured. |
 | Sufficiency before answering | Similarity thresholds and lexical coverage withhold insufficient sources; SQL queries filter tenant, active document and current version. This is a relevance heuristic, not proof of a complete answer. |
-| Versioned prompt | `commerce-privacy-v10` combines a configurable persona with mandatory rules plus an ESTILO block (WhatsApp-like Empório tone: answer first, short, no greeting loops, light citations; prompt-only, so live replies still sometimes use em dashes, long policy answers or a templated closing question); documents arrive in `<untrusted_document>` as untrusted data. Guardrails and authorization remain in code. Per-turn welcome notes are validated against the same instruction string the model sees (truthful “welcome already sent”, no assumed hours). Unbacked handoff claims are rejected in code. The rule against offering a return start or freight quote (route those to a human) is prompt-only; no output filter enforces it. Money validation is unchanged from `main`: amounts are read from digits only, and a customer budget is exempt only when written in digits. |
+| Versioned prompt | `commerce-privacy-v11` combines a configurable persona with mandatory rules plus an ESTILO block (WhatsApp-like Empório tone: answer first, short, no greeting loops, light citations; prompt-only, so live replies still sometimes use em dashes, long policy answers or a templated closing question); documents arrive in `<untrusted_document>` as untrusted data. Guardrails and authorization remain in code. Per-turn welcome notes are validated against the same instruction string the model sees (truthful “welcome already sent”, no assumed hours). Unbacked handoff claims are rejected in code. Offering photos or a return start/freight quote without a tool is forbidden (prompt-only; no image tool exists; specs stay on `get_product_details`). Money validation is unchanged from `main`: amounts are read from digits only, and a customer budget is exempt only when written in digits. |
 | Validated CSVs + vault | Types, references and uniqueness are validated; import uses per-tenant upsert. Restricted data stays local; recognized spans become reversible tokens resolved by local tools. This is pseudonymization, not anonymization. |
 | Persisted history | Postgres stores conversations, original and redacted messages, sources and tool executions; only the redacted form goes to the model. Redis stores the vault with a sliding 24-hour TTL. |
 
@@ -766,6 +770,13 @@ The tools identified per workstream are:
 | T — English translation of the documentation and README restructure | OpenAI Codex (README, docs index, service flows, context/evaluation/security docs) and Cursor (process, architecture, ADRs, reviews and test reports) |
 | E2 — English-customer fixes (`commerce-privacy-v9`), re-recordings and R9 battery | Cursor |
 | Integration of the English delivery and diagnosis of the R9 order failure (lockout from earlier recordings) | Claude Code |
+| E3–E3f — humanized store tone (`commerce-privacy-v10`): style rules, warm fixed messages, lighter citations, fixes after each review round | Cursor |
+| V3–V3f — independent read-only reviews of the tone work (six rounds; rejected attempts became regression tests; final approval) | OpenAI Codex |
+| E4 — configurable reasoning effort and live latency/quality comparison (`low` shipped) | Cursor |
+| T1 — deterministic triage menu before the agent | OpenAI Codex (implementation) and Cursor (completion after a usage limit, smoke test) |
+| RT1 — independent read-only review of T1 and E4 | Cursor |
+| T2 — triage UX fixes from the owner's browser test (no menu after a first-contact question, menu digits only right after the menu, purchase intent to sales) | Cursor (implementation); Claude Code (review and live re-check) |
+| Coordination of the tone, latency and triage work, decisions after each review, and integration | Claude Code |
 
 The workflow was: **contracts → parallel workstreams → independent review (R1) →
 adversarial tests (R2) → evaluation with gates (G1) → fixes by owners (E2/F2, E3/F3) →

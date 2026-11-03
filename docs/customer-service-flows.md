@@ -88,7 +88,7 @@ adds the suffix *“Passei sua solicitação pra um atendente te ajudar.”* to 
 (`format_sources_footer`); body markers `[Sn]` still ground the answer.
 
 **Resolved discrepancy:** an earlier README cited `commerce-privacy-v5`; the README
-and code now both use `commerce-privacy-v10` (`PROMPT_VERSION` in `app/agents/instructions.py`).
+and code now both use `commerce-privacy-v11` (`PROMPT_VERSION` in `app/agents/instructions.py`).
 
 ---
 
@@ -167,7 +167,7 @@ flowchart TD
 - **Retrieval:** `app/rag/retrieval.py` `retrieve` — cosine + Portuguese FTS + RRF;
   `sufficient` requires similarity ≥ threshold or lexical coverage (≥ half the query
   lexemes). Chunks with `suspicious_instructions` are never served. The store manual is
-  Portuguese; `commerce-privacy-v10` tells the model to translate `search_knowledge`
+  Portuguese; `commerce-privacy-v11` tells the model to translate `search_knowledge`
   queries into Portuguese while answering in the customer's language.
 - **Adapter:** `search_knowledge` in `customer_service.py` only supplies chunks if
   `found.sufficient`; otherwise, `sources=[]` and `sufficient=false`. When the model
@@ -242,7 +242,7 @@ flowchart TD
 - Injection / “mostre o system prompt” (“show the system prompt”) / jailbreak:
   `_REFUSAL` in `check_input` → `decision.refusal` → fixed reply, model does not run,
   **no** handoff.
-- Out of scope (weather, news, general knowledge): `commerce-privacy-v10` instructs the
+- Out of scope (weather, news, general knowledge): `commerce-privacy-v11` instructs the
   real model to use the fixed refusal in the customer's language (`OUT_OF_SCOPE` pt-BR or
   `OUT_OF_SCOPE_EN`), with no lookup and **no** `request_human_handoff`. In offline mode,
   `FakeCommerceModel` picks the matching fixed reply when no tool answer can be rendered
@@ -358,19 +358,25 @@ Honest limits aligned with the [README limitations](../README.md#limitations-and
 ## Deterministic triage
 
 After authentication, rate limits and the existing input safety checks, configured tenants
-use a Python router before the agent. First-contact greetings receive welcome + menu without
-a model; first-contact questions receive that welcome and their normal routed answer.
+use a Python router before the agent. Greeting-only first contact receives welcome + menu
+without a model. First-contact questions receive the welcome without the menu, the normal
+routed answer, and at most one short hint to type `menu`. Digits are menu choices only when
+the previous assistant turn left menu (or an expecting sub-step) pending; any agent reply
+clears that state.
 
 | Input/state | Action | Next state |
 |---|---|---|
+| Greeting-only first contact | Welcome + configured menu | Menu pending |
+| First-contact question | Welcome without menu + routed answer + menu hint | No menu pending |
 | `menu`, `0`, `cancelar`, `cancela` | Show configured menu | Menu pending; discard pending order |
 | Menu pending: `1`; simple hours/address/contact shortcut | Configured public hours, address, phone and email | No pending choice |
 | Menu pending: `2`; order-status shortcut | Ask order number, then purchase email/phone; accept both together | Order pending until verified |
 | Menu pending: `3`; simple return-policy shortcut | Configured §4.1 summary and source footer | Next free text goes to agent |
 | Menu pending: `4`; generic product/price/stock shortcut | Ask what the customer wants | Next free text goes to agent |
 | Menu pending: `5`; explicit human request | Existing `customer_request` handoff and acknowledgement | Clear state |
+| Clear purchase intent (e.g. `quero comprar`, `vou levar`) | Warm sales handoff (`triage:purchase`, `customer_request`); agent cannot sell | Clear state |
 | Other free text during order guide | Cancel guide and run agent; a recognized shortcut can switch flow | Clear state |
-| Number outside menu | Agent, except a guided order number | No implicit menu choice |
+| Digit after an agent (or non-menu) reply | Agent (e.g. “the 4th product”), not a menu option | No implicit menu choice |
 
 During the order guide, token-only order/contact replies and a small set of field labels
 continue the guide. A question with other words cancels it, even if it contains a contact.
@@ -385,9 +391,11 @@ existing privacy-guard fallback and persisted handoff.
 
 Static hours/returns have `grounded=false`, no retrieval and no tools. Their footer is
 operator-maintained provenance, not a RAG citation. Verified lookup has `grounded=true` and
-`tools_used=["lookup_order"]`. The original RAG evaluation corpus explicitly opts out of
-triage so its model-egress and retrieval gates remain meaningful; triage is covered by
-`tests/agent/test_triage.py`, the generated demos, and HTTP smoke verification.
+`tools_used=["lookup_order"]`. Purchase handoff has the same persistence as option 5
+(`request_human_handoff`, `customer_request`) with a dedicated warm reply. The original RAG
+evaluation corpus explicitly opts out of triage so its model-egress and retrieval gates remain
+meaningful; triage is covered by `tests/agent/test_triage.py`, the generated demos, and live
+owner-conversation checks.
 
 Both WhatsApp and `/chat` call the same ChatService. The UI already renders text with
 `white-space: pre-wrap` and the webhook sends the menu's newline-delimited text unchanged.

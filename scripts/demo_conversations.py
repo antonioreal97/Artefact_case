@@ -128,6 +128,15 @@ _TRANSLATIONS = {
         "Posso te ajudar só com assuntos da loja: produtos, preços, estoque, pedidos e "
         "nossas políticas."
     ): ("I can only help with store topics: products, prices, stock, orders, and our policies."),
+    "Se preferir, digite menu para ver as opções.": (
+        "If you prefer, type menu to see the options."
+    ),
+    "Qual é o número do pedido? Depois, vou pedir o e-mail ou telefone usado na compra.": (
+        "What is the order number? Then I'll ask for the email or phone used for the purchase."
+    ),
+    ("Que ótimo! Vou te passar pra nossa equipe finalizar a compra com você."): (
+        "Great! I'll put you through to our team to finish the purchase with you."
+    ),
 }
 
 
