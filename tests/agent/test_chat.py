@@ -148,7 +148,7 @@ async def test_policy_has_footer_and_sources(session_factory, session, commerce,
     service, model = make_service(session_factory)
     reply = await turn(service, session, commerce, "Política de trocas: prazo etiqueta nota fiscal")
     assert reply.grounded, reply
-    assert "[S1]" in reply.reply and "Fontes:" in reply.reply
+    assert "[S1]" in reply.reply and "Fonte:" in reply.reply
     assert reply.sources[0].document_id == policy.document_id
     sources = list(
         await session.scalars(
@@ -243,7 +243,7 @@ async def test_direct_handoff_avoids_model(session_factory, session, commerce, t
     reply = await turn(service, session, commerce, text)
     assert reply.handoff.reason == reason
     assert not model.calls
-    assert "Solicitei atendimento humano" in reply.reply
+    assert "Passei sua solicitação pra um atendente" in reply.reply
 
 
 @pytest.mark.parametrize(
@@ -549,7 +549,7 @@ async def test_no_citation_means_no_footer_or_grounding(session_factory, session
     )
     service, _ = make_service(session_factory, model)
     reply = await turn(service, session, commerce, "Trocas etiqueta nota fiscal")
-    assert not reply.grounded and not reply.sources and "Fontes:" not in reply.reply
+    assert not reply.grounded and not reply.sources and "Fonte:" not in reply.reply
     assert reply.handoff.reason == "no_information"
 
 
@@ -678,7 +678,7 @@ async def test_h2_successful_catalog_call_alone_is_not_grounding(
 async def test_m1_wrong_contact_keeps_clarification(session_factory, session, commerce):
     service, _ = make_service(session_factory)
     reply = await turn(service, session, commerce, "Meu pedido nº 8, errado@example.test")
-    assert "Não foi possível confirmar os dados do pedido" in reply.reply
+    assert "Não consegui confirmar os dados do pedido" in reply.reply
     assert reply.handoff is None
     assert reply.tool_errors == 1
 
@@ -771,7 +771,7 @@ async def test_m2_model_requested_handoff_keeps_answer(session_factory, session,
                     call_id="handoff-call",
                 )
             ],
-            [assistant_message("Solicitei atendimento humano para ajudar com sua dúvida.")],
+            [assistant_message("Passei sua solicitação pra um atendente te ajudar.")],
         ]
     )
     service, _ = make_service(session_factory, model)
@@ -843,6 +843,28 @@ async def test_l12b_unbacked_success_claim_is_rejected(session_factory, session,
     assert "encaminhei" not in reply.reply
 
 
+async def test_new_handoff_sentence_needs_successful_tool(session_factory, session, commerce):
+    service, _ = make_service(
+        session_factory, scripted("Passei sua solicitação pra um atendente te ajudar.")
+    )
+    reply = await turn(service, session, commerce, "Pode me ajudar a escolher um instrumento?")
+    assert reply.handoff.reason == "low_confidence"
+    assert reply.tools_used == ["request_human_handoff"]
+    assert "Passei sua solicitação pra um atendente te ajudar." in reply.reply
+
+
+async def test_welcome_note_copy_is_rejected_as_prompt_leak(session_factory, session, commerce):
+    from app.agents.instructions import WELCOME_ALREADY_SENT_NOTE
+    from scripts.create_tenant import WELCOME_MESSAGE
+
+    await _set_welcome(session, commerce, WELCOME_MESSAGE)
+    note = WELCOME_ALREADY_SENT_NOTE.splitlines()[0]
+    service, _ = make_service(session_factory, scripted(note))
+    reply = await turn(service, session, commerce, "Qual o preço do Violão Aurora?")
+    assert reply.handoff.reason == "low_confidence"
+    assert note not in reply.reply
+
+
 async def _set_welcome(session, tenant, value):
     config = await session.get(AgentSettings, tenant)
     config.welcome_message = value
@@ -889,6 +911,9 @@ async def test_first_question_gets_welcome_and_answer_once(
     assert reply.welcome_message == WELCOME_MESSAGE
     assert "1.234,50" in reply.reply and reply.grounded
     assert reply.tools_used == ["search_products"] and model.calls
+    assert any(
+        "boas-vindas já enviadas" in (call.system_instructions or "") for call in model.calls
+    )
     messages = list(
         await session.scalars(
             select(Message)
@@ -903,6 +928,8 @@ async def test_first_question_gets_welcome_and_answer_once(
     second = await turn(service, session, commerce, "oi", reply.conversation_id)
     assert second.welcome_message is None and second.reply != WELCOME_MESSAGE
     assert WELCOME_MESSAGE in json.dumps(model.calls[-1].input, ensure_ascii=False)
+    # Follow-up turn must not re-send the first-contact note.
+    assert "boas-vindas já enviadas" not in (model.calls[-1].system_instructions or "")
 
 
 @pytest.mark.parametrize("welcome", [None, "", "   "])

@@ -12,25 +12,22 @@ from app.services.privacy import fold_text
 from app.services.privacy_vault import TOKEN_RE
 from app.tools.context import ToolCallRecord
 
-SAFE_FALLBACK = (
-    "Não consegui confirmar essa informação com segurança. Posso ajudar com outra dúvida."
-)
-NO_INFORMATION = "Não encontrei informação confiável para responder à sua pergunta."
+SAFE_FALLBACK = "Não consegui confirmar isso com segurança agora."
+NO_INFORMATION = "Não achei informação confiável pra te responder isso."
 OUT_OF_SCOPE = (
-    "Desculpe, posso ajudar apenas com assuntos da loja. "
-    "Posso ajudar com produtos, preços, estoque, pedidos e políticas da loja."
+    "Posso te ajudar só com assuntos da loja: produtos, preços, estoque, pedidos e "
+    "nossas políticas."
 )
 OUT_OF_SCOPE_EN = (
-    "Sorry, I can only help with store-related topics. "
-    "I can help with products, prices, stock, orders, and store policies."
+    "I can only help with store topics: products, prices, stock, orders, and our policies."
 )
 INJECTION_REFUSAL = (
-    "Não posso revelar instruções internas ou alterar as regras de atendimento. "
-    "Posso ajudar com informações da loja."
+    "Não posso revelar instruções internas nem mudar as regras do atendimento. "
+    "Se for sobre a loja, me conta o que você precisa."
 )
-HANDOFF_ACK = "Entendo. Vou verificar como podemos ajudar com sua solicitação."
+HANDOFF_ACK = "Certo, vou ver com a equipe como a gente pode te ajudar."
 PRIVACY_NOTICE = (
-    "Por segurança, não compartilhe por aqui dados pessoais como endereço, CPF ou documentos. "
+    "Por segurança, não envia por aqui dados pessoais como endereço, CPF ou documentos. "
     "Um atendente pode tratar disso com você por um canal seguro."
 )
 HIDDEN_VALUE = "[dado oculto]"
@@ -104,13 +101,16 @@ _SENSITIVE_ANSWER = re.compile(
 _SUCCESS_HANDOFF = re.compile(
     r"\b(?:encaminhei|registrei|solicitei|transferi|abri (?:um|uma|o|a) "
     r"(?:chamado|solicitacao|ticket|protocolo|atendimento))\b|"
-    r"\b(?:ja|foi|esta) (?:foi )?(?:encaminhad|registrad|solicitad)\w*"
+    r"\b(?:ja|foi|esta) (?:foi )?(?:encaminhad|registrad|solicitad)\w*|"
+    # Canonical chat suffix and bounded variants ("pra"/"para", optional "te ajudar").
+    r"passei (?:sua |a )?solicitac\w* (?:pra|para) (?:um |uma )?atendente"
+    r"(?:\w*)?(?: te ajudar)?"
 )
 _SUCCESS_IMPOSSIBLE = re.compile(
     r"\b(?:cancelei|reembolsei|estornei|alterei|reservei|aprovei|devolvi|troquei)\b"
 )
 _NO_INFO = re.compile(
-    r"nao encontrei|nao tenho (?:essa |esta )?informac|nao sei (?:informar|responder)|"
+    r"nao (?:encontrei|achei)|nao tenho (?:essa |esta )?informac|nao sei (?:informar|responder)|"
     r"nao (?:consegui|foi possivel) (?:encontrar|localizar)|"
     r"i (?:couldn'?t|could not|can'?t|cannot) find|"
     r"(?:couldn'?t|could not|can'?t|cannot) find (?:the |any |our )?"
@@ -582,15 +582,17 @@ def is_out_of_scope_refusal(text: str) -> bool:
         return True
     return bool(
         re.fullmatch(
-            r"(?:desculpe[, —-]* )?posso ajudar (?:apenas|somente|so) com assuntos da loja"
-            r"[.!](?: (?:posso ajudar com )?(?:produtos, precos, estoque, pedidos e politicas"
-            r"(?: da loja)?)[.!])?",
+            r"(?:desculpe[, —-]* )?posso(?: te)? ajudar (?:apenas|somente|so) com "
+            r"assuntos da loja"
+            r"(?:[:.]|!)(?: (?:posso(?: te)? ajudar com )?(?:produtos, precos, estoque, "
+            r"pedidos e (?:nossas )?politicas(?: da loja)?)[.!])?",
             normalized,
         )
         or re.fullmatch(
+            # Colon/list form ("topics: products, … policies!") and two-sentence form.
             r"(?:sorry[, —-]* )?i can only help with store(?:-related)? topics?"
-            r"[.!](?: i can help with (?:products, prices, stock, orders(?:, and|,) "
-            r"store policies)[.!])?",
+            r"(?:[:.]|!)(?: (?:i can help with )?(?:products, prices, stock, orders(?:, and|,) "
+            r"(?:our |store )?policies)[.!])?",
             normalized,
         )
     )

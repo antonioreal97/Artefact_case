@@ -77,12 +77,15 @@ flowchart TD
 | Persistence | Messages, `MessageSource`, `ToolExecution`, `AuditEvent`, `handoff` status if applicable. | End of `handle_message` |
 
 Fixed messages (`SAFE_FALLBACK`, `NO_INFORMATION`, `OUT_OF_SCOPE`, `OUT_OF_SCOPE_EN`,
-`INJECTION_REFUSAL`, `HANDOFF_ACK`, `PRIVACY_NOTICE`) are in `app/agents/guardrails.py`.
-A handoff in the current turn adds the suffix *“Solicitei atendimento humano…”*
-(“I requested human assistance…”) to the reply (`handle_message`).
+`INJECTION_REFUSAL`, `HANDOFF_ACK`, `PRIVACY_NOTICE`) are in `app/agents/guardrails.py`
+(warm Empório attendant wording; same safety meaning). A handoff in the current turn
+adds the suffix *“Passei sua solicitação pra um atendente te ajudar.”* to the reply
+(`handle_message`). Citation footers render as compact `Fonte: …` lines (or
+`Fonte [Sn]: …` when two or more sources are cited)
+(`format_sources_footer`); body markers `[Sn]` still ground the answer.
 
 **Resolved discrepancy:** an earlier README cited `commerce-privacy-v5`; the README
-and code now both use `commerce-privacy-v9` (`PROMPT_VERSION` in `app/agents/instructions.py`).
+and code now both use `commerce-privacy-v10` (`PROMPT_VERSION` in `app/agents/instructions.py`).
 
 ---
 
@@ -161,10 +164,12 @@ flowchart TD
 - **Retrieval:** `app/rag/retrieval.py` `retrieve` — cosine + Portuguese FTS + RRF;
   `sufficient` requires similarity ≥ threshold or lexical coverage (≥ half the query
   lexemes). Chunks with `suspicious_instructions` are never served. The store manual is
-  Portuguese; `commerce-privacy-v9` tells the model to translate `search_knowledge`
+  Portuguese; `commerce-privacy-v10` tells the model to translate `search_knowledge`
   queries into Portuguese while answering in the customer's language.
 - **Adapter:** `search_knowledge` in `customer_service.py` only supplies chunks if
-  `found.sufficient`; otherwise, `sources=[]` and `sufficient=false`.
+  `found.sufficient`; otherwise, `sources=[]` and `sufficient=false`. When the model
+  passes a `category` and the filtered search is insufficient (e.g. `shipping` for a
+  manual filed as `politicas`), the tool retries once without the category.
 - Documents are untrusted data (`<untrusted_document>`); policy instructs the model
   to ignore commands within them.
 - Conflict: the model should answer with the consensus, cite both sources and only
@@ -234,7 +239,7 @@ flowchart TD
 - Injection / “mostre o system prompt” (“show the system prompt”) / jailbreak:
   `_REFUSAL` in `check_input` → `decision.refusal` → fixed reply, model does not run,
   **no** handoff.
-- Out of scope (weather, news, general knowledge): `commerce-privacy-v9` instructs the
+- Out of scope (weather, news, general knowledge): `commerce-privacy-v10` instructs the
   real model to use the fixed refusal in the customer's language (`OUT_OF_SCOPE` pt-BR or
   `OUT_OF_SCOPE_EN`), with no lookup and **no** `request_human_handoff`. In offline mode,
   `FakeCommerceModel` picks the matching fixed reply when no tool answer can be rendered
@@ -279,7 +284,7 @@ creation fails completely, in which case `ChatReply` has no `handoff`).
 | `sensitive_topic` | `check_input` → `_SENSITIVE`; or `discusses_sensitive_topic` after the reply; or tool | Before model: `HANDOFF_ACK`. After model: reply (if retained) + suffix | Before: no. After/tool: yes |
 | `privacy_guard` | Text still `looks_restricted`; vault save failed; `PrivacyBoundaryError`; order lockout (`locked`); unauthorized TRACKING/DATE token; footer with an improper token | `PRIVACY_NOTICE` (restricted input) or `SAFE_FALLBACK` (other cases) + suffix | Restricted input: no. Others: may have run before failing closed |
 | `tool_failure` | `Runner` exception (timeout, MaxTurns, generic error); tool with `unavailable`/`internal_error` | `SAFE_FALLBACK` + suffix | Attempted; failed |
-| `low_confidence` | `output_violation` (price/stock/commercial_claim/citation/prompt_leak/success_claim) | `SAFE_FALLBACK` + suffix | Yes (reply discarded) |
+| `low_confidence` | `output_violation` (price/stock/commercial_claim/citation/prompt_leak/success_claim). Offers to start a return or quote freight are prompt-only (not enforced in code). Amounts come from digits only and a customer budget is exempt only in digit form (unchanged from `main`); number words are not parsed (documented limitation, D-36) | `SAFE_FALLBACK` + suffix | Yes (reply discarded) |
 | `no_information` | Model ran, without citation or tool grounding, the answer is not a recognized scope-only refusal, and `admits_no_information` or `has_factual_claim` | `NO_INFORMATION` + suffix | Yes |
 | `conflicting_sources` | Model calls `request_human_handoff` with this reason (RAG policy) | Useful consensus answer (if the model complies) + suffix | Yes |
 

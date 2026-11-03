@@ -238,17 +238,23 @@ def test_duplicate_csv_key_rejected(tmp_path: Path, table: str) -> None:
 
 @pytest.mark.integration
 async def test_seed_welcome_defaults_and_preserves_operator_value(session, monkeypatch):
-    from scripts.create_tenant import WELCOME_MESSAGE
+    from scripts.create_tenant import HANDOFF_MESSAGE, WELCOME_MESSAGE
 
     monkeypatch.setattr("scripts.create_tenant.TENANT_SLUG", f"welcome-{uuid.uuid4().hex}")
     tenant, _ = await create_tenant(session)
     await session.commit()
     config = await session.get(AgentSettings, tenant)
     assert config.welcome_message == WELCOME_MESSAGE
+    assert config.handoff_message == HANDOFF_MESSAGE
     config.welcome_message = "Olá! Seja bem-vindo à nossa loja."
+    config.handoff_message = "Um momento, já te passo."
     await session.commit()
     await create_tenant(session)
     assert config.welcome_message == "Olá! Seja bem-vindo à nossa loja."
+    assert config.handoff_message == "Um momento, já te passo."
+    await create_tenant(session, refresh_welcome_and_handoff=True)
+    assert config.welcome_message == WELCOME_MESSAGE
+    assert config.handoff_message == HANDOFF_MESSAGE
     for empty in (None, "", "   "):
         config.welcome_message = empty
         await session.commit()

@@ -2,7 +2,7 @@
 
 Mode: deterministic fake model + hash embeddings; not a real LLM.
 Command: `uv run python -m scripts.demo_conversations`
-Date (UTC): 2026-11-02
+Date (UTC): 2026-11-03
 
 Execution: real ChatService, CSV catalog and Empório da Música seed policies, disposable database; queries use the local snapshot, not a live ERP.
 
@@ -16,9 +16,9 @@ An unrelated question is refused without a human handoff or factual grounding.
 
 **Agent (welcome):**
 
-Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. Como posso ajudar?
+Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, e sábado das 9h às 13h (domingo e feriado, fechado). Posso te ajudar com instrumentos, preços, estoque, pedidos e nossas políticas.
 
-> EN: Hello! Welcome to Empório da Música — your music starts here! Our service hours are Monday to Friday, 9 am to 6 pm, and Saturday, 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies. How can I help?
+> EN: Hi! This is Empório da Música. We're here Monday to Friday, 9 am to 6 pm, and Saturday 9 am to 1 pm (closed Sundays and holidays). I can help with instruments, prices, stock, orders and our policies.
 
 **Agent:**
 
@@ -40,8 +40,7 @@ E-mail contato@empóriodamusica.com.br
 
 Fundação 2008 [S3]
 
-Fontes:
-[S3] Políticas da Loja — §1.2 Dados da Empresa, p. 2
+Fonte: Políticas da Loja, §1.2 Dados da Empresa (p. 2)
 
 > EN: 1.2 Company Details
 >
@@ -61,8 +60,7 @@ Fontes:
 >
 > Founded 2008 [S3]
 >
-> Sources:
-> [S3] Store Policies — §1.2 Company Details, p. 2
+> Source: Store Policies, §1.2 Company Details (p. 2)
 
 - Tools: search_knowledge.
 - Citations: [S3] Store Policies, 1.2 Company Details, page 2.
@@ -77,9 +75,9 @@ Fontes:
 
 **Agent:**
 
-Desculpe, posso ajudar apenas com assuntos da loja. Posso ajudar com produtos, preços, estoque, pedidos e políticas da loja.
+Posso te ajudar só com assuntos da loja: produtos, preços, estoque, pedidos e nossas políticas.
 
-> EN: Sorry, I can only help with store-related matters. I can help with products, prices, stock, orders and store policies.
+> EN: I can only help with store topics: products, prices, stock, orders, and our policies.
 
 - Tools: search_knowledge.
 - Citations: none.

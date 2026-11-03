@@ -384,7 +384,9 @@ async def test_policy_sanity(
         citations = build_citations(result.chunks)
         assert citations[0].page == top.page_start
         assert all(len(c.quote) <= 240 for c in citations)
-        assert format_sources_footer(citations).startswith("Fontes:\n[S1] Políticas da Loja — §")
+        footer = format_sources_footer(citations)
+        assert footer.startswith("Fonte:") or footer.startswith("Fonte [S1]:")
+        assert "Políticas da Loja, §" in footer
     with capsys.disabled():
         print(capsys.readouterr().out)
 

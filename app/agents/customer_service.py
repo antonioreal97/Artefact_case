@@ -35,8 +35,17 @@ def _serialize[T](
     return result.model_dump_json()
 
 
-def build_customer_service_agent(agent_settings: AgentSettings) -> Agent[ToolContext]:
+def build_customer_service_agent(
+    agent_settings: AgentSettings,
+    *,
+    welcome_already_sent: bool = False,
+    instructions: str | None = None,
+) -> Agent[ToolContext]:
     allowlist = agent_settings.public_contact_values or []
+    effective_instructions = instructions or build_instructions(
+        agent_settings,
+        welcome_already_sent=welcome_already_sent,
+    )
 
     @function_tool(failure_error_function=None)
     async def search_products(
@@ -121,6 +130,16 @@ def build_customer_service_agent(agent_settings: AgentSettings) -> Agent[ToolCon
                         filters=RetrievalFilters(categories=[category] if category else None),
                         min_similarity=agent_settings.retrieval_min_similarity,
                     )
+                    # The model guesses category names ("shipping" for a manual filed as
+                    # "politicas"); a wrong guess must not hide the answer.
+                    if category and not found.sufficient:
+                        found = await retrieval.retrieve(
+                            session,
+                            tenant_id=ctx.tenant_id,
+                            query=query,
+                            embedder=ctx.embedder,
+                            min_similarity=agent_settings.retrieval_min_similarity,
+                        )
             # Insufficient results are withheld: weak passages are never offered as sources.
             served = found.chunks if found.sufficient else []
             existing = {chunk.chunk_id for chunk in ctx.retrieved_chunks}
@@ -156,7 +175,7 @@ def build_customer_service_agent(agent_settings: AgentSettings) -> Agent[ToolCon
 
     return Agent[ToolContext](
         name=agent_settings.assistant_name,
-        instructions=build_instructions(agent_settings),
+        instructions=effective_instructions,
         model=agent_settings.chat_model,
         model_settings=ModelSettings(store=False, parallel_tool_calls=False),
         tools=[

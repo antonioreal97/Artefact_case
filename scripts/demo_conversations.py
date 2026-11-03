@@ -59,15 +59,13 @@ _TRANSLATIONS = {
     "Qual o endereço da loja?": ("What is the store address?"),
     "Qual é a capital da Islândia?": ("What is the capital of Iceland?"),
     (
-        "Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! Nosso "
-        "atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, das 9h "
-        "às 13h (domingos e feriados, fechado). Posso ajudar com instrumentos, preços, "
-        "estoque, pedidos e nossas políticas. Como posso ajudar?"
+        "Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, "
+        "e sábado das 9h às 13h (domingo e feriado, fechado). "
+        "Posso te ajudar com instrumentos, preços, estoque, pedidos e nossas políticas."
     ): (
-        "Hello! Welcome to Empório da Música — your music starts here! Our service "
-        "hours are Monday to Friday, 9 am to 6 pm, and Saturday, 9 am to 1 pm (closed "
-        "Sundays and holidays). I can help with instruments, prices, stock, orders and "
-        "our policies. How can I help?"
+        "Hi! This is Empório da Música. We're here Monday to Friday, 9 am to 6 pm, "
+        "and Saturday 9 am to 1 pm (closed Sundays and holidays). "
+        "I can help with instruments, prices, stock, orders and our policies."
     ),
     "4.1 Direito de Arrependimento (Compras Online)": ("4.1 Right to Withdraw (Online Purchases)"),
     (
@@ -84,14 +82,13 @@ _TRANSLATIONS = {
     "• O frete de devolução é por conta da loja em caso de arrependimento.": (
         "• The store pays return shipping for change-of-mind returns."
     ),
-    "Fontes:": ("Sources:"),
     "Políticas da Loja": ("Store Policies"),
     (
-        "Não foi possível confirmar os dados do pedido. Verifique o número do pedido e "
-        "o e-mail ou telefone usado na compra."
+        "Não consegui confirmar os dados do pedido. Confere o número e o e-mail ou "
+        "telefone usado na compra?"
     ): (
-        "The order details could not be verified. Check the order number and the email "
-        "or phone number used for the purchase."
+        "I couldn't confirm the order details. Can you check the order number and the "
+        "email or phone used for the purchase?"
     ),
     "Situação: entregue.": ("Status: delivered."),
     "1.2 Dados da Empresa": ("1.2 Company Details"),
@@ -108,12 +105,9 @@ _TRANSLATIONS = {
     "E-mail contato@empóriodamusica.com.br": ("Email contato@empóriodamusica.com.br"),
     "Fundação 2008": ("Founded 2008"),
     (
-        "Desculpe, posso ajudar apenas com assuntos da loja. Posso ajudar com "
-        "produtos, preços, estoque, pedidos e políticas da loja."
-    ): (
-        "Sorry, I can only help with store-related matters. I can help with products, "
-        "prices, stock, orders and store policies."
-    ),
+        "Posso te ajudar só com assuntos da loja: produtos, preços, estoque, pedidos e "
+        "nossas políticas."
+    ): ("I can only help with store topics: products, prices, stock, orders, and our policies."),
 }
 
 
@@ -133,9 +127,10 @@ def _translate(text: str) -> str:
     citation = re.fullmatch(r"(.*) (\[S\d+\])", text)
     if citation:
         return _translate(citation[1]) + " " + citation[2]
-    source = re.fullmatch(r"(\[S\d+\]) (.*) — §(.*), p\. (\d+)", text)
+    source = re.fullmatch(r"Fonte(?: \[(S\d+)\])?: (.*), §(.*) \(p\. (\d+)\)", text)
     if source:
-        return f"{source[1]} {_translate(source[2])} — §{_translate(source[3])}, p. {source[4]}"
+        label = f" [{source[1]}]" if source[1] else ""
+        return f"Source{label}: {_translate(source[2])}, §{_translate(source[3])} (p. {source[4]})"
     raise ValueError(f"Missing demo English translation: {text!r}")
 
 

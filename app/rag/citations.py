@@ -30,17 +30,22 @@ def build_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
 
 
 def format_sources_footer(citations: list[Citation]) -> str:
+    """Compact customer-facing footer; [Sn] markers in the body still ground the reply."""
     if not citations:
         return ""
-    lines = ["Fontes:"]
+    # With 2+ sources, keep [Sn] so readers can map nonconsecutive body markers.
+    multi = len(citations) >= 2
+    lines: list[str] = []
     for citation in citations:
-        source = f"[{citation.label}] {citation.title}"
+        prefix = f"Fonte [{citation.label}]: " if multi else "Fonte: "
+        parts = [f"{prefix}{citation.title}"]
         if citation.section:
             section = (
                 citation.section if citation.section.startswith("§") else "§" + citation.section
             )
-            source += " — " + section
+            parts.append(section)
+        line = ", ".join(parts)
         if citation.page is not None:
-            source += f", p. {citation.page}"
-        lines.append(source)
+            line += f" (p. {citation.page})"
+        lines.append(line)
     return "\n".join(lines)

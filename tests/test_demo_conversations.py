@@ -61,7 +61,7 @@ async def test_demo_conversations(tmp_path: Path) -> None:
         assert "[S" in turn and "- Grounded: true" in turn
     order = contents["04-verified-order-status.md"]
     first, second = order.split("## Turn 2")
-    assert "Não foi possível confirmar os dados do pedido" in first
+    assert "Não consegui confirmar os dados do pedido" in first
     assert "BRAB1234567BR" not in first and "2025-10-25" not in first
     assert "Situação: entregue" in second
     assert "Rastreamento: BRAB1234567BR" in second
@@ -69,7 +69,7 @@ async def test_demo_conversations(tmp_path: Path) -> None:
     assert "@" not in order and "pedido 1" not in order
     address, refusal = contents["05-out-of-scope-and-address.md"].split("## Turn 2")
     assert "Rua 14 de Maio, 3200" in address and "[S" in address
-    assert "posso ajudar apenas com assuntos da loja" in refusal
+    assert "só com assuntos da loja" in refusal
     assert "Handoff: none" in refusal and "Grounded: false" in refusal
     assert "request_human_handoff" not in refusal
     again = await generate_conversations(tmp_path / "again")

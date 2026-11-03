@@ -27,12 +27,11 @@ from app.core.security import generate_api_key, hash_api_key
 from app.models import AgentSettings, ApiKey, Tenant, TenantChannel
 
 WELCOME_MESSAGE = (
-    "Olá! Bem-vindo(a) à Empório da Música — sua música começa aqui! "
-    "Nosso atendimento funciona de segunda a sexta, das 9h às 18h, e aos sábados, "
-    "das 9h às 13h (domingos e feriados, fechado). "
-    "Posso ajudar com instrumentos, preços, estoque, pedidos e nossas políticas. "
-    "Como posso ajudar?"
+    "Oi! Aqui é o Empório da Música. Atendimento de segunda a sexta, das 9h às 18h, "
+    "e sábado das 9h às 13h (domingo e feriado, fechado). "
+    "Posso te ajudar com instrumentos, preços, estoque, pedidos e nossas políticas."
 )
+HANDOFF_MESSAGE = "Vou te passar pra nossa equipe."
 
 TENANT_SLUG = "emporio-da-musica"
 SCOPES = ["chat", "knowledge:write", "knowledge:read", "handoffs", "conversations:read"]
@@ -119,8 +118,13 @@ async def create_tenant(
     api_key: str | None = None,
     whatsapp_phone_number_id: str | None = None,
     chat_api_key: str | None = None,
+    refresh_welcome_and_handoff: bool = False,
 ) -> tuple[uuid.UUID, str | None]:
-    """Stage idempotent seed configuration. Caller commits before revealing a new key."""
+    """Stage idempotent seed configuration. Caller commits before revealing a new key.
+
+    Existing welcome/handoff text is preserved unless ``refresh_welcome_and_handoff``
+    is True (explicit operator opt-in) or welcome is empty.
+    """
     await session.execute(
         insert(Tenant)
         .values(slug=TENANT_SLUG, name="Empório da Música", status="active")
@@ -144,7 +148,7 @@ async def create_tenant(
                 default_language="pt-BR",
                 timezone="America/Campo_Grande",
                 welcome_message=WELCOME_MESSAGE,
-                handoff_message="Vou encaminhar você para nossa equipe. Sua música começa aqui.",
+                handoff_message=HANDOFF_MESSAGE,
                 public_contact_values=PUBLIC_CONTACT_VALUES,
                 extra={"tagline": "Sua música começa aqui."},
             )
@@ -152,8 +156,10 @@ async def create_tenant(
     else:
         # Existing seed tenants need newly documented public contacts too. Preserve
         # operator-added values and persona/model settings; never touch other tenants.
-        if not (config.welcome_message or "").strip():
+        if refresh_welcome_and_handoff or not (config.welcome_message or "").strip():
             config.welcome_message = WELCOME_MESSAGE
+        if refresh_welcome_and_handoff or not (config.handoff_message or "").strip():
+            config.handoff_message = HANDOFF_MESSAGE
         config.public_contact_values = list(
             dict.fromkeys([*(config.public_contact_values or []), *PUBLIC_CONTACT_VALUES])
         )
@@ -188,7 +194,7 @@ async def create_tenant(
     return tenant.id, plaintext
 
 
-async def run(api_key_variable: str | None) -> None:
+async def run(api_key_variable: str | None, *, refresh_welcome_and_handoff: bool = False) -> None:
     key = api_key_from_env(api_key_variable)
     try:
         async with get_sessionmaker()() as session:
@@ -197,6 +203,7 @@ async def run(api_key_variable: str | None) -> None:
                 api_key=key,
                 whatsapp_phone_number_id=os.environ.get("WHATSAPP_PHONE_NUMBER_ID"),
                 chat_api_key=optional_api_key_from_env(CHAT_KEY_ENV),
+                refresh_welcome_and_handoff=refresh_welcome_and_handoff,
             )
             await session.commit()
         if plaintext:
@@ -210,9 +217,22 @@ def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-key-from-env", metavar="VARIABLE")
+    parser.add_argument(
+        "--refresh-welcome-and-handoff",
+        action="store_true",
+        help=(
+            "Overwrite Empório welcome_message and handoff_message with the seed defaults. "
+            "Without this flag, existing operator-set text is preserved."
+        ),
+    )
     args = parser.parse_args()
     try:
-        asyncio.run(run(args.api_key_from_env))
+        asyncio.run(
+            run(
+                args.api_key_from_env,
+                refresh_welcome_and_handoff=args.refresh_welcome_and_handoff,
+            )
+        )
     except Exception as exc:
         # Database exceptions can include secrets and customer parameters.
         print(f"Tenant setup failed ({type(exc).__name__}).", file=sys.stderr)

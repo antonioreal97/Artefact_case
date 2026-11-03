@@ -371,6 +371,7 @@ class ChatService:
         answer = SAFE_FALLBACK
         failure_reason: str | None = None
         model_ran = False
+        turn_instructions: str | None = None
         provider: ModelProvider | None = None
         if decision.refusal:
             answer = INJECTION_REFUSAL
@@ -397,7 +398,16 @@ class ChatService:
                         known_values,
                         timeout_seconds=self.settings.model_timeout_seconds,
                     )
-                    agent = build_customer_service_agent(agent_settings)
+                    welcome_already_sent = bool(welcome) and not welcome_only
+                    # Build once: model and output_violation must see the identical string.
+                    turn_instructions = build_instructions(
+                        agent_settings,
+                        welcome_already_sent=welcome_already_sent,
+                    )
+                    agent = build_customer_service_agent(
+                        agent_settings,
+                        instructions=turn_instructions,
+                    )
                     result = await Runner.run(
                         agent,
                         inputs,
@@ -456,7 +466,7 @@ class ChatService:
                 answer,
                 records=ctx.tool_calls,
                 labels=labels,
-                instructions=build_instructions(agent_settings),
+                instructions=turn_instructions or build_instructions(agent_settings),
                 policy_text=POLICY_TEXT,
                 documents=documents,
                 current_message=redacted,
@@ -522,7 +532,7 @@ class ChatService:
             welcome = None
             welcome_only = False
         if handoff_this_turn:
-            answer += "\nSolicitei atendimento humano para ajudar com sua solicitação."
+            answer += "\nPassei sua solicitação pra um atendente te ajudar."
             conversation.status = "handoff"
         if footer:
             answer += "\n\n" + footer

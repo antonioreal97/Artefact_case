@@ -40,7 +40,11 @@ def test_citations_preserve_first_seen_order_across_searches() -> None:
     assert citations[0].page == 3 and len(citations[0].quote) == 240
     assert (
         format_sources_footer(citations[:1])
-        == "Fontes:\n[S1] Políticas da Loja — §4 Trocas e Devoluções, p. 3"
+        == "Fonte: Políticas da Loja, §4 Trocas e Devoluções (p. 3)"
+    )
+    assert format_sources_footer(citations) == (
+        "Fonte [S1]: Políticas da Loja, §4 Trocas e Devoluções (p. 3)\n"
+        "Fonte [S2]: Garantia, §4 Trocas e Devoluções (p. 3)"
     )
     assert format_sources_footer([]) == ""
 

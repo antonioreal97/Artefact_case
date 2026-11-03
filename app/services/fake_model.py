@@ -281,7 +281,7 @@ class FakeCommerceModel(ScriptedModel):
                         label = "Rastreamento" if key == "tracking_token" else "Previsão de entrega"
                         parts.append(f"{label}: {value}")
             elif name == "request_human_handoff":
-                parts.append("Solicitei atendimento humano para ajudar com sua dúvida.")
+                parts.append("Passei sua solicitação pra um atendente te ajudar.")
         store_related = any(
             pattern.search(text) for pattern in (_COMMERCE, _SERVICE, _PRODUCT, _POLICY)
         ) or bool(_STORE.search(fold_text(text)))
